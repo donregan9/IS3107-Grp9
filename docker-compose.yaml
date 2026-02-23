@@ -1,0 +1,106 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  airflow-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: airflow-init
+    environment:
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS: 'false'
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: '7T0gH5NyflLV8zknKMiJeH-xHPXjqH8VJQ7h99Q8N5I='
+      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./logs:/opt/airflow/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: >
+      bash -c "airflow db migrate &&
+               airflow users create --firstname admin --lastname admin --email admin@example.com --username admin --password admin --role Admin || true"
+
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: airflow-webserver
+    environment:
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: '7T0gH5NyflLV8zknKMiJeH-xHPXjqH8VJQ7h99Q8N5I='
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./logs:/opt/airflow/logs
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    command: airflow webserver
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: airflow-scheduler
+    environment:
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: '7T0gH5NyflLV8zknKMiJeH-xHPXjqH8VJQ7h99Q8N5I='
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./logs:/opt/airflow/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    command: airflow scheduler
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: airflow-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
