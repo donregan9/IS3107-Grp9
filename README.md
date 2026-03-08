@@ -140,3 +140,75 @@ For issues with:
 - **Airflow**: https://airflow.apache.org/docs/
 - **Docker**: https://docs.docker.com/
 - **PostgreSQL**: https://www.postgresql.org/docs/
+
+# SuperSet Dashboard Setup guide
+
+This setup will be using docker compose.
+
+1. Clone Superset Repo
+
+git clone https://github.com/apache/superset
+
+2. Start Up Superset in terminal
+
+cd superset
+git checkout tags/6.0.0
+docker compose -f docker-compose-image-tag.yml up
+
+3. Navigate to GUI in localhost (default is 8088)
+
+http://localhost:8088/
+Default credentials: 
+username: admin
+password: admin
+
+To create new users for testing, run in terminal:
+docker exec -it superset_app superset fab create-admin
+
+# Superset user guide
+
+There are numerouse pre-generated superset dashboards to explore.
+
+To start up a SHARED dashboard (via Import):
+
+1. Navigate to Dashboard tab
+2. Click Box-Arrow Icon (Import) in top-right conner next to Bulk Select and +Dashboard
+3. Select the shared zip folder of the dashboard
+
+`For now we can try sharing dashboards via telegram`
+
+To Export Dashboard for Sharing:
+1. Dashboard Tab
+2. Click Export next to the Dashboard
+3. Installed the zip folder
+
+# Superset Connect DB Guide
+
+1. Top-right corner `+` sign
+2. Connect to Database, choose PostgresSQL
+3. Enter the following details for the DB
+
+(If you configured different password in PGAdmin, input accordingly)
+Host: host.docker.internal (this is docker local for windows, may be diff for macOS)
+Port: 5432
+name: airflow
+password: airflow
+Display Name: IS3107PostgreSQL (Or any other name)
+
+4. Try connecting, if successful, navigate to SQL Lab (Don't need insert new data)
+
+Test with (should return same results):
+SELECT * FROM public.stock_prices
+ORDER BY id ASC 
+
+5. Save that query as a dataset (choose a name)
+6. Now able to create charts using that dataset
+
+Note: While it pulls data from the DB, it will only pull whatever has been run already;
+   Need to rerun the DAG to pull daily results if you did not leave container running overnight, 
+   else there will not be the most recent data.
+
+
+# To remove Superset
+1. Remove like any normal container environment
+docker compose down
