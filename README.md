@@ -189,15 +189,21 @@ To Export Dashboard for Sharing:
 3. Enter the following details for the DB
 
 (If you configured different password in PGAdmin, input accordingly)
+
 Host: host.docker.internal (this is docker local for windows, may be diff for macOS)
+
 Port: 5432
+
 name: airflow
+
 password: airflow
+
 Display Name: IS3107PostgreSQL (Or any other name)
 
 4. Try connecting, if successful, navigate to SQL Lab (Don't need insert new data)
 
 Test with (should return same results):
+
 SELECT * FROM public.stock_prices
 ORDER BY id ASC 
 
@@ -211,4 +217,5 @@ Note: While it pulls data from the DB, it will only pull whatever has been run a
 
 # To remove Superset
 1. Remove like any normal container environment
+
 docker compose down
