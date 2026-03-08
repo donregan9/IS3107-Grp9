@@ -100,7 +100,7 @@ def create_table():
                 actual_close    FLOAT,        -- filled in the next day for comparison
                 model_version   VARCHAR(50),
                 created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(ticker, predicted_date, model_version)
+                UNIQUE(ticker, predicted_date)
             );
             CREATE INDEX IF NOT EXISTS idx_pred_ticker_date ON model_predictions(ticker, predicted_date);
 
