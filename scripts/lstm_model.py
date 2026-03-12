@@ -45,7 +45,8 @@ def _get_conn():
 FEATURE_COLS = [
     'close', 'daily_return', 'sma_20', 'sma_50',
     'ema_12', 'ema_26', 'macd', 'macd_signal',
-    'rsi_14', 'bb_upper', 'bb_lower', 'volatility_14', 'volume_sma_20'
+    'rsi_14', 'bb_upper', 'bb_lower', 'volatility_14', 'volume_sma_20',
+    'bb_width', 'volume_ratio_20', 'return_3d', 'return_5d'
 ]
 
 SEQUENCE_LEN = 30          # look-back window (trading days)
