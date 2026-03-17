@@ -16,8 +16,7 @@ import logging
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.sensors.external_task import ExternalTaskSensor
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Make scripts/ importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
@@ -87,20 +86,8 @@ with DAG(
     },
 ) as prediction_dag:
 
-    wait_for_market_data = ExternalTaskSensor(
-        task_id='wait_for_market_momentum_extraction',
-        external_dag_id='market_momentum_extraction',
-        external_task_id=None,           # wait for the whole DAG to complete
-        execution_delta=timedelta(hours=1),  # market DAG runs at 00:00, prediction at 01:00
-        timeout=3600,                    # wait up to 1 hour
-        poke_interval=60,                # check every 60 seconds
-        mode='reschedule',               # release worker slot while waiting
-    )
-
     predict_task = PythonOperator(
         task_id='predict_next_day_close',
         python_callable=task_predict,
         op_kwargs={'ticker': TICKER},
     )
-
-    wait_for_market_data >> predict_task
