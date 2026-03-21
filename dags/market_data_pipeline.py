@@ -185,7 +185,6 @@ def compute_and_store_features(ticker, **context):
         df['macd_signal']   = df['macd'].ewm(span=9, adjust=False).mean()
         df['volatility_14'] = df['daily_return'].rolling(14).std()
         df['volume_sma_20'] = df['volume'].rolling(20).mean()
-        df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / rolling_mean
         df['volume_ratio_20'] = df['volume'] / df['volume_sma_20']
         df['return_3d'] = df['close'].pct_change(periods=3)
         df['return_5d'] = df['close'].pct_change(periods=5)
@@ -195,6 +194,7 @@ def compute_and_store_features(ticker, **context):
         rolling_std         = df['close'].rolling(20).std()
         df['bb_upper']      = rolling_mean + (2 * rolling_std)
         df['bb_lower']      = rolling_mean - (2 * rolling_std)
+        df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / rolling_mean
 
         # RSI (14-day)
         delta = df['close'].diff()
@@ -221,7 +221,8 @@ def compute_and_store_features(ticker, **context):
         execute_values(cursor, """
             INSERT INTO stock_features
                 (ticker, date, close, daily_return, sma_20, sma_50, ema_12, ema_26,
-                 macd, macd_signal, rsi_14, bb_upper, bb_lower, volatility_14, volume_sma_20)
+                 macd, macd_signal, rsi_14, bb_upper, bb_lower, volatility_14, 
+                 volume_sma_20, bb_width, volume_ratio_20, return_3d, return_5d)
             VALUES %s
             ON CONFLICT (ticker, date) DO UPDATE SET
                 close         = EXCLUDED.close,
