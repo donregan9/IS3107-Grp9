@@ -3,6 +3,7 @@
 # ---------------------------------------------------------------------------
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.datasets import Dataset
 from datetime import datetime, timedelta
 import requests
 import psycopg2
@@ -21,6 +22,7 @@ DB_NAME     = os.getenv('DB_NAME', 'airflow')
 DB_PORT     = os.getenv('DB_PORT', '5432')
 
 ALPHA_VANTAGE_API_KEY = os.getenv('ALPHAVANTAGE_API_KEY', 'XHD8MQIGSGDCPGSY')
+FEATURES_READY_DATASET = Dataset('dataset://stock_features/aapl/ready')
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -121,9 +123,19 @@ def create_table():
                 bb_lower       FLOAT,
                 volatility_14  FLOAT,
                 volume_sma_20  FLOAT,
+                bb_width        FLOAT,
+                volume_ratio_20 FLOAT,
+                return_3d       FLOAT,
+                return_5d       FLOAT,
                 UNIQUE(ticker, date)
             );
             CREATE INDEX IF NOT EXISTS idx_feat_ticker_date ON stock_features(ticker, date);
+
+            -- Backward-compatible migrations for older stock_features schemas
+            ALTER TABLE stock_features ADD COLUMN IF NOT EXISTS bb_width FLOAT;
+            ALTER TABLE stock_features ADD COLUMN IF NOT EXISTS volume_ratio_20 FLOAT;
+            ALTER TABLE stock_features ADD COLUMN IF NOT EXISTS return_3d FLOAT;
+            ALTER TABLE stock_features ADD COLUMN IF NOT EXISTS return_5d FLOAT;
 
             CREATE TABLE IF NOT EXISTS model_metadata (
                 id              SERIAL PRIMARY KEY,
@@ -187,6 +199,12 @@ def compute_and_store_features(ticker, **context):
         rolling_std         = df['close'].rolling(20).std()
         df['bb_upper']      = rolling_mean + (2 * rolling_std)
         df['bb_lower']      = rolling_mean - (2 * rolling_std)
+        df['bb_width']      = (df['bb_upper'] - df['bb_lower']) / rolling_mean
+
+        # Additional momentum/volume features
+        df['volume_ratio_20'] = df['volume'] / df['volume_sma_20']
+        df['return_3d']       = df['close'].pct_change(periods=3)
+        df['return_5d']       = df['close'].pct_change(periods=5)
 
         # RSI (14-day)
         delta = df['close'].diff()
@@ -201,9 +219,10 @@ def compute_and_store_features(ticker, **context):
         # Build upsert values
         values = [
             (ticker, row['date'], row['close'], row['daily_return'],
-             row['sma_20'], row['sma_50'], row['ema_12'], row['ema_26'],
-             row['macd'], row['macd_signal'], row['rsi_14'],
-             row['bb_upper'], row['bb_lower'], row['volatility_14'], row['volume_sma_20'])
+            row['sma_20'], row['sma_50'], row['ema_12'], row['ema_26'],
+            row['macd'], row['macd_signal'], row['rsi_14'],
+            row['bb_upper'], row['bb_lower'], row['volatility_14'], row['volume_sma_20'],
+            row['bb_width'], row['volume_ratio_20'], row['return_3d'], row['return_5d'])
             for _, row in df.iterrows()
         ]
 
@@ -212,7 +231,8 @@ def compute_and_store_features(ticker, **context):
         execute_values(cursor, """
             INSERT INTO stock_features
                 (ticker, date, close, daily_return, sma_20, sma_50, ema_12, ema_26,
-                 macd, macd_signal, rsi_14, bb_upper, bb_lower, volatility_14, volume_sma_20)
+                 macd, macd_signal, rsi_14, bb_upper, bb_lower, volatility_14, volume_sma_20,
+                 bb_width, volume_ratio_20, return_3d, return_5d)
             VALUES %s
             ON CONFLICT (ticker, date) DO UPDATE SET
                 close         = EXCLUDED.close,
@@ -227,7 +247,11 @@ def compute_and_store_features(ticker, **context):
                 bb_upper      = EXCLUDED.bb_upper,
                 bb_lower      = EXCLUDED.bb_lower,
                 volatility_14 = EXCLUDED.volatility_14,
-                volume_sma_20 = EXCLUDED.volume_sma_20
+                volume_sma_20 = EXCLUDED.volume_sma_20,
+                bb_width        = EXCLUDED.bb_width,
+                volume_ratio_20 = EXCLUDED.volume_ratio_20,
+                return_3d       = EXCLUDED.return_3d,
+                return_5d       = EXCLUDED.return_5d
         """, values)
         conn.commit()
         cursor.close()
@@ -306,7 +330,8 @@ with DAG(
     feature_engineering_task = PythonOperator(
         task_id='compute_features',
         python_callable=compute_and_store_features,
-        op_kwargs={'ticker': 'AAPL'}
+        op_kwargs={'ticker': 'AAPL'},
+        outlets=[FEATURES_READY_DATASET]
     )
 
     create_table_task >> daily_fetch_task >> feature_engineering_task
