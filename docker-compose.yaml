@@ -112,6 +112,49 @@ services:
     depends_on:
       - postgres
 
+  redis:
+    image: redis:7-alpine
+    container_name: superset-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  superset:
+    build:
+      context: .
+      dockerfile: Dockerfile.superset
+    container_name: superset
+    environment:
+      SUPERSET_SECRET_KEY: 'your-secret-key-change-this-in-production'
+      SUPERSET_SQLALCHEMY_DATABASE_URI: 'postgresql://airflow:airflow@postgres:5432/superset'
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "8089:8088"
+    volumes:
+      - superset_home:/app/superset_home
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "superset db upgrade &&
+             superset fab create-admin --username admin --firstname Admin --lastname Admin --email admin@superset.com --password admin || true &&
+             superset init &&
+             superset run -h 0.0.0.0 -p 8088 --with-threads"
+    healthcheck:
+      test: [ "CMD", "curl", "--fail", "http://localhost:8088/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
 volumes:
   postgres_data:
   models_data:
+  superset_home:

@@ -16,6 +16,7 @@ import logging
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.datasets import Dataset
 from datetime import datetime
 
 # Make scripts/ importable
@@ -24,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
 log = logging.getLogger(__name__)
 
 TICKER = 'AAPL'   # change or extend to a list as needed
+FEATURES_READY_DATASET = Dataset('dataset://stock_features/aapl/ready')
 
 # ---------------------------------------------------------------------------
 # Wrapper callables (lazy-import tensorflow inside the task so the Airflow
@@ -72,13 +74,14 @@ with DAG(
 
 # ---------------------------------------------------------------------------
 # DAG 2 – Daily prediction
-#   Cron: every day at 01:00 UTC (after midnight data fetch + feature run)
+#   Dataset-triggered: runs whenever market_momentum_extraction emits
+#   the features-ready dataset from compute_features.
 # ---------------------------------------------------------------------------
 with DAG(
     dag_id='lstm_daily_prediction',
     description='Generate next-day close-price prediction using the latest LSTM model',
     start_date=datetime(2026, 1, 1),
-    schedule='0 1 * * 1-5',                 # Mon–Fri at 01:00 UTC (trading days only)
+    schedule=[FEATURES_READY_DATASET],
     catchup=False,
     tags=['lstm', 'prediction', 'daily'],
     default_args={
