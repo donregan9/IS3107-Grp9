@@ -175,6 +175,13 @@ def compute_and_store_features(ticker, **context):
         df['date'] = pd.to_datetime(df['date']).dt.date
         df = df.sort_values('date').reset_index(drop=True)
 
+        # Bollinger Bands (20-day)
+        rolling_mean        = df['close'].rolling(20).mean()
+        rolling_std         = df['close'].rolling(20).std()
+        df['bb_upper']      = rolling_mean + (2 * rolling_std)
+        df['bb_lower']      = rolling_mean - (2 * rolling_std)
+
+
         # --- Indicators ---
         df['daily_return']  = df['close'].pct_change()
         df['sma_20']        = df['close'].rolling(20).mean()
@@ -190,12 +197,7 @@ def compute_and_store_features(ticker, **context):
         df['return_3d'] = df['close'].pct_change(periods=3)
         df['return_5d'] = df['close'].pct_change(periods=5)
 
-        # Bollinger Bands (20-day)
-        rolling_mean        = df['close'].rolling(20).mean()
-        rolling_std         = df['close'].rolling(20).std()
-        df['bb_upper']      = rolling_mean + (2 * rolling_std)
-        df['bb_lower']      = rolling_mean - (2 * rolling_std)
-
+        
         # RSI (14-day)
         delta = df['close'].diff()
         gain  = delta.clip(lower=0).rolling(14).mean()
@@ -217,11 +219,12 @@ def compute_and_store_features(ticker, **context):
         ]
 
         conn = get_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor()  
         execute_values(cursor, """
             INSERT INTO stock_features
                 (ticker, date, close, daily_return, sma_20, sma_50, ema_12, ema_26,
-                 macd, macd_signal, rsi_14, bb_upper, bb_lower, volatility_14, volume_sma_20)
+                macd, macd_signal, rsi_14, bb_upper, bb_lower, volatility_14, volume_sma_20,
+                bb_width, volume_ratio_20, return_3d, return_5d)
             VALUES %s
             ON CONFLICT (ticker, date) DO UPDATE SET
                 close         = EXCLUDED.close,
