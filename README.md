@@ -144,6 +144,23 @@ docker-compose restart postgres
 ### Port already in use
 Edit `docker-compose.yaml` and change ports (e.g., 8081:8080 for Airflow)
 
+## Set-up Process
+
+Navigate to postgresql
+1. Add New Server
+2. Server Name: airflow
+3. Host: postgres
+4. Port: 5432
+5. Database, Username and password: airflow
+
+Navigate to airflow
+1. Run Backfill DAG
+2. Run Market Momentum DAG
+3. Run Weekly training
+4. Run Daily prediction
+
+Follow the steps on Superset Setup Guide Below
+
 ## Next Steps
 
 1. Modify `market_data_pipeline.py` DAG to fetch different tickers
