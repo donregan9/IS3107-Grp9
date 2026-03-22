@@ -286,11 +286,27 @@ def predict_next_day(ticker: str) -> dict:
     with open(_scaler_path(ticker), 'rb') as f:
         scaler = pickle.load(f)
 
+    # Backward compatibility: older trained models/scalers may have fewer
+    # features than the current FEATURE_COLS list.
+    scaler_feature_count = int(getattr(scaler, 'n_features_in_', len(FEATURE_COLS)))
+    if scaler_feature_count > len(FEATURE_COLS):
+        raise ValueError(
+            f"Scaler expects {scaler_feature_count} features, but only {len(FEATURE_COLS)} are configured."
+        )
+    active_feature_cols = FEATURE_COLS[:scaler_feature_count]
+    if scaler_feature_count != len(FEATURE_COLS):
+        log.warning(
+            "Using %d/%d features for prediction to match saved scaler/model. "
+            "Run weekly training to upgrade model to the latest feature set.",
+            scaler_feature_count,
+            len(FEATURE_COLS),
+        )
+
     # --- Load the last SEQUENCE_LEN rows ---
     conn = _get_conn()
     df = pd.read_sql(
         f"""
-        SELECT date, {', '.join(FEATURE_COLS)}
+        SELECT date, {', '.join(active_feature_cols)}
         FROM stock_features
         WHERE ticker = %s
         ORDER BY date DESC
@@ -312,13 +328,13 @@ def predict_next_day(ticker: str) -> dict:
     predicted_date = _next_trading_day(latest_date)
 
     # Scale and build single sequence
-    scaled = scaler.transform(df[FEATURE_COLS].values)
-    X = scaled.reshape(1, SEQUENCE_LEN, len(FEATURE_COLS))
+    scaled = scaler.transform(df[active_feature_cols].values)
+    X = scaled.reshape(1, SEQUENCE_LEN, len(active_feature_cols))
 
     raw_pred = model.predict(X, verbose=0)[0, 0]
 
     # Inverse-transform the predicted close
-    pad = np.zeros((1, len(FEATURE_COLS)))
+    pad = np.zeros((1, len(active_feature_cols)))
     pad[0, 0] = raw_pred
     predicted_close = float(scaler.inverse_transform(pad)[0, 0])
 

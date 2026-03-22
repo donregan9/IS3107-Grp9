@@ -97,6 +97,24 @@ Edit `.env` file to change:
 2. Define your DAG using Airflow syntax
 3. Restart Airflow webserver (or it will auto-detect within ~5 minutes)
 
+## DAG Orchestration (Market -> Prediction)
+
+This project uses Airflow Datasets so prediction runs only after features are refreshed.
+
+How it works:
+1. market_momentum_extraction runs create_table -> fetch_daily_stock_data -> compute_features.
+2. compute_features publishes dataset://stock_features/aapl/ready on success.
+3. lstm_daily_prediction is scheduled on that dataset and starts after the dataset event is emitted.
+
+Trigger behavior:
+1. Daily scheduled market run success triggers prediction.
+2. Manual market run success also triggers prediction.
+3. If compute_features fails, no dataset event is emitted, so prediction will not run.
+
+Notes:
+1. Dataset scheduling requires Airflow 2.4 or later.
+2. After DAG code changes, wait for scheduler refresh or restart airflow-scheduler and airflow-webserver.
+
 ## Adding Dependencies
 
 1. Update `requirements.txt`
