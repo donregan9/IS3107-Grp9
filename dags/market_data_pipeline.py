@@ -301,6 +301,48 @@ def fetch_and_store_stock_data(ticker, **context):
     except Exception as e:
         print(f"Daily fetch error: {e}")
         return {"status": "failed", "error": str(e)}
+    
+# ---------------------------------------------------------------------------
+#   Fetch Data from when Docker is inavtive  (DAILY)
+#   Runs every day on the @daily schedule.
+# ---------------------------------------------------------------------------
+
+def smart_fetch_and_store(ticker, **context):
+    conn = get_connection()
+    cur = conn.cursor()
+    
+    # 1. Find the last date we successfully stored
+    cur.execute("SELECT MAX(date) FROM stock_prices WHERE ticker = %s", (ticker,))
+    last_date_raw = cur.fetchone()[0]
+    conn.close()
+    
+    # If table is empty, default to 99 days ago
+    last_date = last_date_raw.date() if last_date_raw else (datetime.now() - timedelta(days=99)).date()
+    
+    print(f"Last data point in DB: {last_date}. Fetching updates...")
+
+    url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&outputsize=compact&apikey={ALPHA_VANTAGE_API_KEY}'
+    data = requests.get(url).json()
+    time_series = data.get("Time Series (Daily)", {})
+
+    new_records = []
+    for date_str, row in time_series.items():
+        curr_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        
+        # ONLY grab data newer than what we have
+        if curr_date > last_date:
+            new_records.append((
+                ticker, date_str,
+                float(row['1. open']), float(row['2. high']),
+                float(row['3. low']),  float(row['4. close']),
+                int(row['5. volume'])
+            ))
+
+    if new_records:
+        upsert_values(new_records)
+        print(f"Successfully caught up! Added {len(new_records)} missing days.")
+    else:
+        print("Database is already up to date.")
 
 # ---------------------------------------------------------------------------
 # DAG definition
@@ -323,7 +365,7 @@ with DAG(
 
     daily_fetch_task = PythonOperator(
         task_id='fetch_daily_stock_data',
-        python_callable=fetch_and_store_stock_data,
+        python_callable=smart_fetch_and_store,
         op_kwargs={'ticker': 'AAPL'}
     )
 

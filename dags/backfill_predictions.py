@@ -108,32 +108,7 @@ def _next_trading_day(dt) -> date:
     return next_day
 
 # ---------------------------------------------------------------------------
-# Task 1: create_table
-# ---------------------------------------------------------------------------
-def create_backfill_table():
-    conn = _get_conn()
-    cur  = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS backfill_model_predictions (
-            id              SERIAL PRIMARY KEY,
-            ticker          VARCHAR(10),
-            predicted_date  DATE,
-            predicted_close FLOAT,
-            actual_close    FLOAT,
-            model_version   VARCHAR(50),
-            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(ticker, predicted_date)
-        );
-        CREATE INDEX IF NOT EXISTS idx_backfill_ticker_date
-            ON backfill_model_predictions(ticker, predicted_date);
-    """)
-    conn.commit()
-    cur.close()
-    conn.close()
-    log.info("backfill_model_predictions table ready.")
-
-# ---------------------------------------------------------------------------
-# Task 2: backfill_recent_predictions
+# Task: backfill_recent_predictions
 # ---------------------------------------------------------------------------
 def backfill_recent_predictions(ticker: str, predict_days: int, **context):
     """
@@ -259,13 +234,11 @@ def backfill_recent_predictions(ticker: str, predict_days: int, **context):
     conn = _get_conn()
     cur  = conn.cursor()
     execute_values(cur, """
-        INSERT INTO backfill_model_predictions
+        INSERT INTO model_predictions
             (ticker, predicted_date, predicted_close, actual_close, model_version)
         VALUES %s
         ON CONFLICT (ticker, predicted_date) DO UPDATE SET
-            predicted_close = EXCLUDED.predicted_close,
-            actual_close    = EXCLUDED.actual_close,
-            model_version   = EXCLUDED.model_version
+            actual_close    = EXCLUDED.actual_close
     """, records)
     conn.commit()
     cur.close()
@@ -306,7 +279,7 @@ def backfill_recent_predictions(ticker: str, predict_days: int, **context):
 # DAG Definition
 # ---------------------------------------------------------------------------
 with DAG(
-    dag_id='backfill_predictions_recent',
+    dag_id='backfill_predictions',
     description=f'One-off: predict the last {PREDICT_DAYS} days and compare with actuals',
     start_date=datetime(2026, 1, 1),
     schedule=None,      # manual trigger only
@@ -317,18 +290,12 @@ with DAG(
     },
 ) as dag:
 
-    create_table_task = PythonOperator(
-        task_id='create_backfill_table',
-        python_callable=create_backfill_table,
-    )
-
     backfill_task = PythonOperator(
         task_id='backfill_recent_predictions',
         python_callable=backfill_recent_predictions,
         op_kwargs={
             'ticker':       TICKER,
-            'predict_days': PREDICT_DAYS,   # ← driven by the constant above
+            'predict_days': PREDICT_DAYS,
         },
     )
-
-    create_table_task >> backfill_task
+    backfill_task
