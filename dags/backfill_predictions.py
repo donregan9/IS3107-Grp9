@@ -259,7 +259,7 @@ def backfill_recent_predictions(ticker: str, predict_days: int, **context):
     conn = _get_conn()
     cur  = conn.cursor()
     execute_values(cur, """
-        INSERT INTO backfill_model_predictions
+        INSERT INTO model_predictions
             (ticker, predicted_date, predicted_close, actual_close, model_version)
         VALUES %s
         ON CONFLICT (ticker, predicted_date) DO UPDATE SET
@@ -317,10 +317,10 @@ with DAG(
     },
 ) as dag:
 
-    create_table_task = PythonOperator(
-        task_id='create_backfill_table',
-        python_callable=create_backfill_table,
-    )
+    # create_table_task = PythonOperator(
+    #     task_id='create_backfill_table',
+    #     python_callable=create_backfill_table,
+    # )
 
     backfill_task = PythonOperator(
         task_id='backfill_recent_predictions',
@@ -331,4 +331,5 @@ with DAG(
         },
     )
 
-    create_table_task >> backfill_task
+    # create_table_task >> backfill_task
+    backfill_task
