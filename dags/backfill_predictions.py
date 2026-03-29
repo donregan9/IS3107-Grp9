@@ -263,9 +263,7 @@ def backfill_recent_predictions(ticker: str, predict_days: int, **context):
             (ticker, predicted_date, predicted_close, actual_close, model_version)
         VALUES %s
         ON CONFLICT (ticker, predicted_date) DO UPDATE SET
-            predicted_close = EXCLUDED.predicted_close,
-            actual_close    = EXCLUDED.actual_close,
-            model_version   = EXCLUDED.model_version
+            actual_close    = EXCLUDED.actual_close
     """, records)
     conn.commit()
     cur.close()
