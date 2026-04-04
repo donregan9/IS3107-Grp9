@@ -183,6 +183,33 @@ CHART_CONFIG = {
             "time_grain_sqla": "P1D",
         },
     },
+        13: {
+        "name":     "Latest Price Date",
+        "viz_type": "table",
+        "params": {
+            "all_columns": ["ticker", "latest_price_date"],
+            "groupby": [],
+            "row_limit": 1000,
+        },
+    },
+    14: {
+        "name":     "Latest Feature Date",
+        "viz_type": "table",
+        "params": {
+            "all_columns": ["ticker", "latest_feature_date"],
+            "groupby": [],
+            "row_limit": 1000,
+        },
+    },
+    15: {
+        "name":     "Latest Prediction Date",
+        "viz_type": "table",
+        "params": {
+            "all_columns": ["ticker", "model_version", "latest_prediction_date"],
+            "groupby": [],
+            "row_limit": 1000,
+        },
+    },
 }
 
 # Collect all chart/dataset names for teardown matching

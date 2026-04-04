@@ -143,3 +143,28 @@ WHERE dag_id IN ('market_momentum_extraction', 'lstm_daily_prediction', 'lstm_we
   AND start_date IS NOT NULL
   AND end_date IS NOT NULL
 ORDER BY run_date;
+
+-- 13) Latest price date (Live Status card)
+SELECT
+  ticker,
+  MAX(date) AS latest_price_date
+FROM stock_prices
+GROUP BY ticker
+ORDER BY ticker;
+
+-- 14) Latest feature date (Live Status card)
+SELECT
+  ticker,
+  MAX(date) AS latest_feature_date
+FROM stock_features
+GROUP BY ticker
+ORDER BY ticker;
+
+-- 15) Latest prediction date (Live Status card)
+SELECT
+  ticker,
+  model_version,
+  MAX(predicted_date) AS latest_prediction_date
+FROM model_predictions
+GROUP BY ticker, model_version
+ORDER BY ticker, model_version;
