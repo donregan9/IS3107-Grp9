@@ -144,6 +144,230 @@ WHERE dag_id IN ('market_momentum_extraction', 'lstm_daily_prediction', 'lstm_we
   AND end_date IS NOT NULL
 ORDER BY run_date;
 
+
+-- -------------------------------------------------------------------------
+-- Dashboard Build Pack (aligned to presentation layout)
+-- Includes prediction_horizon for dashboard filter controls.
+-- prediction_horizon: daily (model_predictions) or backfill (backfill_model_predictions)
+-- -------------------------------------------------------------------------
+
+-- 13) Header card: latest price date
+SELECT MAX(date)::date AS latest_price_date
+FROM stock_prices
+WHERE ticker = 'AAPL';
+
+-- 14) Header card: latest feature date
+SELECT MAX(date)::date AS latest_feature_date
+FROM stock_features
+WHERE ticker = 'AAPL';
+
+-- 15) Header card: latest prediction date (across daily + backfill)
+WITH prediction_base AS (
+  SELECT ticker, predicted_date, model_version, 'daily'::text AS prediction_horizon
+  FROM model_predictions
+  UNION ALL
+  SELECT ticker, predicted_date, model_version, 'backfill'::text AS prediction_horizon
+  FROM backfill_model_predictions
+)
+SELECT MAX(predicted_date)::date AS latest_prediction_date
+FROM prediction_base
+WHERE ticker = 'AAPL';
+
+-- 16) Header card: 7-day MAE (latest 7 comparable predictions)
+WITH prediction_base AS (
+  SELECT ticker, predicted_date, predicted_close, actual_close, model_version, 'daily'::text AS prediction_horizon
+  FROM model_predictions
+  UNION ALL
+  SELECT ticker, predicted_date, predicted_close, actual_close, model_version, 'backfill'::text AS prediction_horizon
+  FROM backfill_model_predictions
+), ranked AS (
+  SELECT
+    ticker,
+    predicted_date,
+    ABS(predicted_close - actual_close) AS abs_error,
+    ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY predicted_date DESC) AS rn
+  FROM prediction_base
+  WHERE ticker = 'AAPL'
+    AND actual_close IS NOT NULL
+)
+SELECT AVG(abs_error) AS mae_7d
+FROM ranked
+WHERE rn <= 7;
+
+-- 17) Header card: 7-day directional accuracy (latest 7 comparable predictions)
+WITH prediction_base AS (
+  SELECT ticker, predicted_date, predicted_close, actual_close, model_version, 'daily'::text AS prediction_horizon
+  FROM model_predictions
+  UNION ALL
+  SELECT ticker, predicted_date, predicted_close, actual_close, model_version, 'backfill'::text AS prediction_horizon
+  FROM backfill_model_predictions
+), base AS (
+  SELECT
+    ticker,
+    predicted_date,
+    predicted_close,
+    actual_close,
+    LAG(actual_close) OVER (PARTITION BY ticker ORDER BY predicted_date) AS prev_actual_close
+  FROM prediction_base
+  WHERE ticker = 'AAPL'
+), flags AS (
+  SELECT
+    predicted_date,
+    CASE
+      WHEN actual_close IS NULL OR prev_actual_close IS NULL THEN NULL
+      WHEN predicted_close >= prev_actual_close AND actual_close >= prev_actual_close THEN 1.0
+      WHEN predicted_close < prev_actual_close AND actual_close < prev_actual_close THEN 1.0
+      ELSE 0.0
+    END AS direction_hit
+  FROM base
+), ranked AS (
+  SELECT
+    predicted_date,
+    direction_hit,
+    ROW_NUMBER() OVER (ORDER BY predicted_date DESC) AS rn
+  FROM flags
+  WHERE direction_hit IS NOT NULL
+)
+SELECT AVG(direction_hit) AS directional_accuracy_7d
+FROM ranked
+WHERE rn <= 7;
+
+-- 18) Model performance: predicted vs actual (supports horizon filter)
+WITH prediction_base AS (
+  SELECT ticker, predicted_date, predicted_close, actual_close, model_version, 'daily'::text AS prediction_horizon
+  FROM model_predictions
+  UNION ALL
+  SELECT ticker, predicted_date, predicted_close, actual_close, model_version, 'backfill'::text AS prediction_horizon
+  FROM backfill_model_predictions
+)
+SELECT
+  predicted_date AS ds,
+  ticker,
+  model_version,
+  prediction_horizon,
+  predicted_close,
+  actual_close
+FROM prediction_base
+WHERE ticker = 'AAPL'
+ORDER BY ds;
+
+-- 19) Model performance: error over time (supports horizon filter)
+WITH prediction_base AS (
+  SELECT ticker, predicted_date, predicted_close, actual_close, model_version, 'daily'::text AS prediction_horizon
+  FROM model_predictions
+  UNION ALL
+  SELECT ticker, predicted_date, predicted_close, actual_close, model_version, 'backfill'::text AS prediction_horizon
+  FROM backfill_model_predictions
+)
+SELECT
+  predicted_date AS ds,
+  ticker,
+  model_version,
+  prediction_horizon,
+  (predicted_close - actual_close) AS error,
+  ABS(predicted_close - actual_close) AS abs_error
+FROM prediction_base
+WHERE ticker = 'AAPL'
+  AND actual_close IS NOT NULL
+ORDER BY ds;
+
+-- 20) Stability: rolling MAE and RMSE (7-day, supports horizon filter)
+WITH prediction_base AS (
+  SELECT ticker, predicted_date, predicted_close, actual_close, model_version, 'daily'::text AS prediction_horizon
+  FROM model_predictions
+  UNION ALL
+  SELECT ticker, predicted_date, predicted_close, actual_close, model_version, 'backfill'::text AS prediction_horizon
+  FROM backfill_model_predictions
+), e AS (
+  SELECT
+    predicted_date,
+    ticker,
+    model_version,
+    prediction_horizon,
+    ABS(predicted_close - actual_close) AS abs_error,
+    POWER(predicted_close - actual_close, 2) AS sq_error
+  FROM prediction_base
+  WHERE ticker = 'AAPL'
+    AND actual_close IS NOT NULL
+)
+SELECT
+  predicted_date AS ds,
+  ticker,
+  model_version,
+  prediction_horizon,
+  AVG(abs_error) OVER (
+    PARTITION BY ticker, model_version, prediction_horizon
+    ORDER BY predicted_date
+    ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+  ) AS rolling_mae_7d,
+  SQRT(AVG(sq_error) OVER (
+    PARTITION BY ticker, model_version, prediction_horizon
+    ORDER BY predicted_date
+    ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+  )) AS rolling_rmse_7d
+FROM e
+ORDER BY ds;
+
+-- 21) Stability: rolling directional accuracy (7-day, supports horizon filter)
+WITH prediction_base AS (
+  SELECT ticker, predicted_date, predicted_close, actual_close, model_version, 'daily'::text AS prediction_horizon
+  FROM model_predictions
+  UNION ALL
+  SELECT ticker, predicted_date, predicted_close, actual_close, model_version, 'backfill'::text AS prediction_horizon
+  FROM backfill_model_predictions
+), base AS (
+  SELECT
+    ticker,
+    model_version,
+    prediction_horizon,
+    predicted_date,
+    predicted_close,
+    actual_close,
+    LAG(actual_close) OVER (
+      PARTITION BY ticker, model_version, prediction_horizon
+      ORDER BY predicted_date
+    ) AS prev_actual_close
+  FROM prediction_base
+  WHERE ticker = 'AAPL'
+), flags AS (
+  SELECT
+    ticker,
+    model_version,
+    prediction_horizon,
+    predicted_date,
+    CASE
+      WHEN actual_close IS NULL OR prev_actual_close IS NULL THEN NULL
+      WHEN predicted_close >= prev_actual_close AND actual_close >= prev_actual_close THEN 1.0
+      WHEN predicted_close < prev_actual_close AND actual_close < prev_actual_close THEN 1.0
+      ELSE 0.0
+    END AS direction_hit
+  FROM base
+)
+SELECT
+  predicted_date AS ds,
+  ticker,
+  model_version,
+  prediction_horizon,
+  AVG(direction_hit) OVER (
+    PARTITION BY ticker, model_version, prediction_horizon
+    ORDER BY predicted_date
+    ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+  ) AS rolling_7d_directional_accuracy
+FROM flags
+ORDER BY ds;
+
+-- 22) Regime/explainability: Bollinger width and volatility trend
+SELECT
+  date AS ds,
+  ticker,
+  bb_width,
+  volatility_14
+FROM stock_features
+WHERE ticker = 'AAPL'
+  AND bb_width IS NOT NULL
+  AND volatility_14 IS NOT NULL
+ORDER BY ds;
+
 -- 13) Latest price date (Live Status card)
 SELECT
   ticker,

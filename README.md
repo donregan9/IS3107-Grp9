@@ -176,81 +176,58 @@ For issues with:
 - **Docker**: https://docs.docker.com/
 - **PostgreSQL**: https://www.postgresql.org/docs/
 
-# SuperSet Dashboard Setup guide
+# Superset Dashboard Setup Guide
 
-This setup will be using docker compose.
+Superset is already included in this project's docker-compose stack.
 
-1. Clone Superset Repo
+1. Start services:
 
-git clone https://github.com/apache/superset
+docker compose up -d
 
-2. Start Up Superset in terminal
+2. Open Superset:
 
-cd superset
-git checkout tags/6.0.0
-docker compose -f docker-compose-image-tag.yml up
+http://localhost:8089
 
-3. Navigate to GUI in localhost (default is 8088)
+Default credentials:
+- username: admin
+- password: admin
 
-http://localhost:8088/
-Default credentials: 
-username: admin
-password: admin
+# Team-Shared Dashboards (Dashboards as Code)
 
-To create new users for testing, run in terminal:
-docker exec -it superset_app superset fab create-admin
+This repo is configured to auto-import dashboard export bundles on Superset startup.
 
-# Superset user guide
+Import folder in git:
+- superset/exports/
 
-There are numerouse pre-generated superset dashboards to explore.
+How to share dashboards with teammates:
+1. In Superset, export your dashboard bundle as a .zip.
+2. Put the zip file into superset/exports/.
+3. Commit and push.
+4. Teammates pull and run docker compose up -d (or docker compose restart superset).
+5. Superset imports bundles automatically at startup.
 
-To start up a SHARED dashboard (via Import):
-
-1. Navigate to Dashboard tab
-2. Click Box-Arrow Icon (Import) in top-right conner next to Bulk Select and +Dashboard
-3. Select the shared zip folder of the dashboard
-
-`For now we can try sharing dashboards via telegram`
-
-To Export Dashboard for Sharing:
-1. Dashboard Tab
-2. Click Export next to the Dashboard
-3. Installed the zip folder
+Notes:
+1. Import uses overwrite mode where supported, so updates can be rolled out by replacing the zip.
+2. Keep only the dashboard bundles you want auto-loaded in superset/exports/.
 
 # Superset Connect DB Guide
 
-1. Top-right corner `+` sign
-2. Connect to Database, choose PostgresSQL
-3. Enter the following details for the DB
+1. Click + (top-right) -> Connect Database -> PostgreSQL.
+2. Use:
 
-(If you configured different password in PGAdmin, input accordingly)
-
-Host: host.docker.internal (this is docker local for windows, may be diff for macOS)
-
+Host: postgres
 Port: 5432
+Database: airflow
+Username: airflow
+Password: airflow
 
-name: airflow
+3. Test connection, then create datasets/charts.
 
-password: airflow
-
-Display Name: IS3107PostgreSQL (Or any other name)
-
-4. Try connecting, if successful, navigate to SQL Lab (Don't need insert new data)
-
-Test with (should return same results):
+Sample query:
 
 SELECT * FROM public.stock_prices
-ORDER BY id ASC 
+ORDER BY id ASC;
 
-5. Save that query as a dataset (choose a name)
-6. Now able to create charts using that dataset
-
-Note: While it pulls data from the DB, it will only pull whatever has been run already;
-   Need to rerun the DAG to pull daily results if you did not leave container running overnight, 
-   else there will not be the most recent data.
-
-
-# To remove Superset
-1. Remove like any normal container environment
+# To Remove Superset
 
 docker compose down

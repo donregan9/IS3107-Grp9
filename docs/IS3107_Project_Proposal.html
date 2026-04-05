@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IS3107 Project Proposal</title>
+  <style>
+    @page { size: A4; margin: 20mm; }
+    body { font-family: "Segoe UI", Arial, sans-serif; line-height: 1.45; color: #1a1a1a; }
+    h1, h2, h3 { margin: 0.6em 0 0.35em; }
+    h1 { font-size: 22px; }
+    h2 { font-size: 18px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+    h3 { font-size: 15px; }
+    p, li { font-size: 12px; }
+    ul, ol { margin-top: 0.2em; }
+    .subtle { color: #555; }
+  </style>
+</head>
+<body>
+  <h1>IS3107 Project Proposal</h1>
+  <p class="subtle"><strong>Title:</strong> Market Data Pipeline with Forecasting and Decision Support Dashboard</p>
+
+  <h2>1. Problem Statement and Motivation</h2>
+  <p>
+    Financial market data is high-volume, noisy, and time-sensitive, while useful insights must be delivered consistently and quickly.
+    This project addresses that challenge by building a reliable end-to-end system that ingests stock data, computes technical indicators,
+    generates model forecasts, and publishes insights through an interactive dashboard.
+  </p>
+  <p>
+    The motivation is threefold: integrate data engineering and analytics tools in one workflow, produce interpretable indicators and model outputs
+    beyond raw OHLCV data, and ensure operational reliability through orchestration and dependency-based triggers.
+    The focus is not only model accuracy but also reproducibility, data freshness, and pipeline observability.
+  </p>
+
+  <h2>2. Planned Datasets and Data Sources</h2>
+  <h3>2.1 Primary Dataset: Market Price Data</h3>
+  <ul>
+    <li>Entity: daily equity time series (current focus: AAPL).</li>
+    <li>Fields: date/time, open, high, low, close, volume (OHLCV).</li>
+    <li>Cadence: daily ingestion with backfill support.</li>
+    <li>Storage: PostgreSQL table <em>stock_prices</em>.</li>
+  </ul>
+
+  <h3>2.2 Derived Dataset: Technical Features</h3>
+  <ul>
+    <li>Trend: SMA(20), SMA(50), EMA(12), EMA(26).</li>
+    <li>Momentum: MACD, MACD signal, RSI(14), return_3d, return_5d, daily_return.</li>
+    <li>Volatility: Bollinger upper/lower, Bollinger width, volatility_14.</li>
+    <li>Volume signals: volume_sma_20, volume_ratio_20.</li>
+    <li>Storage: PostgreSQL table <em>stock_features</em>.</li>
+  </ul>
+
+  <h3>2.3 Model Output Dataset</h3>
+  <ul>
+    <li>Fields: predicted_date, predicted_close, actual_close, model_version, created_at.</li>
+    <li>Storage: PostgreSQL table <em>model_predictions</em>.</li>
+  </ul>
+
+  <h3>2.4 Pipeline Metadata</h3>
+  <p>
+    Airflow operational metadata (e.g., DAG run states and timings) will be queried for reliability and freshness monitoring on the dashboard.
+  </p>
+
+  <h2>3. High-Level Pipeline Design and Tools</h2>
+  <h3>3.1 Logical Flow</h3>
+  <ol>
+    <li><strong>Ingestion:</strong> fetch daily/historical price data, validate schema, upsert to <em>stock_prices</em>.</li>
+    <li><strong>Feature Engineering:</strong> compute indicators/returns, write to <em>stock_features</em>, publish dataset-ready event.</li>
+    <li><strong>Forecasting:</strong> trigger prediction after features refresh, run LSTM inference, store outputs in <em>model_predictions</em>.</li>
+    <li><strong>Serving:</strong> Superset queries PostgreSQL and refreshes visual outputs.</li>
+  </ol>
+
+  <h3>3.2 Tools</h3>
+  <ul>
+    <li>Apache Airflow for orchestration (scheduled + dataset-triggered DAGs).</li>
+    <li>PostgreSQL for storage and analytics queries.</li>
+    <li>Docker Compose for reproducible local deployment.</li>
+    <li>Apache Superset for BI dashboards and operational monitoring.</li>
+    <li>LSTM model pipeline for prediction and versioned outputs.</li>
+  </ul>
+
+  <h2>4. Intended Outputs</h2>
+  <h3>4.1 Dashboard Outputs</h3>
+  <ul>
+    <li><strong>Market panel:</strong> price trend with SMA/EMA, candlestick + volume, RSI, MACD, Bollinger bands.</li>
+    <li><strong>Prediction panel:</strong> predicted vs actual close, error trend, MAE/RMSE by model version, rolling directional accuracy.</li>
+    <li><strong>Pipeline panel:</strong> data freshness cards, DAG success/failure counts, run-duration trend.</li>
+  </ul>
+
+  <h3>4.2 Model and Engineering Outputs</h3>
+  <ul>
+    <li>Daily forecast values and version-tagged prediction records.</li>
+    <li>SQL query pack for dashboard datasets and charts.</li>
+    <li>Containerized setup and documented workflow for reproducibility.</li>
+  </ul>
+
+  <h2>5. Scope, Feasibility, and Anticipated Challenges</h2>
+  <h3>5.1 Scope</h3>
+  <p><strong>In scope:</strong> single-ticker end-to-end pipeline (AAPL), automated refresh, LSTM forecasting, and integrated dashboard.</p>
+  <p><strong>Out of scope:</strong> production cloud HA deployment, intraday low-latency trading signals, and portfolio execution optimization.</p>
+
+  <h3>5.2 Feasibility</h3>
+  <p>
+    The project is feasible in the semester timeframe because major infrastructure is already operational: containerized services,
+    Airflow DAG orchestration, PostgreSQL schema for prices/features/predictions, and Superset integration path.
+    Remaining work focuses on hardening, evaluation visibility, and dashboard polish.
+  </p>
+
+  <h3>5.3 Anticipated Challenges and Mitigation</h3>
+  <ul>
+    <li><strong>Data quality gaps:</strong> handle nulls/missing days with validation and fallback logic in DAG tasks.</li>
+    <li><strong>Model drift:</strong> maintain weekly retraining, versioning, and trend-based error monitoring.</li>
+    <li><strong>Dependency reliability:</strong> enforce dataset-triggered downstream execution to avoid stale inputs.</li>
+    <li><strong>Container dependency issues:</strong> lock setup in compose/dockerfiles and keep health-check diagnostics.</li>
+    <li><strong>Stakeholder interpretability:</strong> pair forecasts with indicators and operational health context.</li>
+  </ul>
+
+  <h2>6. Deliverable Quality Criteria</h2>
+  <ul>
+    <li>Automated daily refresh from ingestion to dashboard.</li>
+    <li>Consistent prediction generation with version tracking.</li>
+    <li>Clear visualization for both market interpretation and pipeline observability.</li>
+    <li>Reproducible setup on teammate environments with minimal manual intervention.</li>
+  </ul>
+
+  <h2>7. Conclusion</h2>
+  <p>
+    This project delivers a realistic full-stack analytics product: ingestion, feature engineering, forecasting, and dashboard-based decision support.
+    It balances technical depth and implementation feasibility, while providing a clear extension path to multi-ticker and cloud-native deployment.
+  </p>
+</body>
+</html>

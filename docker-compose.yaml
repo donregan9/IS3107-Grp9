@@ -138,16 +138,14 @@ services:
       - "8089:8088"
     volumes:
       - superset_home:/app/superset_home
+      - ./scripts/superset_bootstrap.sh:/app/superset_bootstrap.sh:ro
+      - ./superset/exports:/app/superset_exports:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: >
-      sh -c "superset db upgrade &&
-             superset fab create-admin --username admin --firstname Admin --lastname Admin --email admin@superset.com --password admin || true &&
-             superset init &&
-             superset run -h 0.0.0.0 -p 8088 --with-threads"
+    command: ["sh", "/app/superset_bootstrap.sh"]
     healthcheck:
       test: [ "CMD", "curl", "--fail", "http://localhost:8088/health" ]
       interval: 30s
