@@ -367,3 +367,19 @@ WHERE ticker = 'AAPL'
   AND bb_width IS NOT NULL
   AND volatility_14 IS NOT NULL
 ORDER BY ds;
+
+-- 23) Prediction Residuals (Predicted - Actual)
+SELECT 
+    predicted_date AS ds,
+    ticker,
+    model_version,
+    (predicted_close - actual_close) AS residual_error
+FROM model_predictions
+WHERE actual_close IS NOT NULL
+ORDER BY ds ASC;
+
+-- 24) Prediction Error Distribution (Histogram)
+SELECT 
+    (predicted_close - actual_close) AS prediction_error
+FROM model_predictions
+WHERE actual_close IS NOT NULL;

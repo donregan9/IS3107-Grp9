@@ -108,7 +108,9 @@ def backfill_recent_predictions(ticker: str, **context):
     missing_data_df = pd.read_sql("""
         SELECT f.date 
         FROM stock_features f
-        LEFT JOIN model_predictions p ON f.ticker = p.ticker AND f.date = p.predicted_date
+        LEFT JOIN model_predictions p ON f.ticker = p.ticker 
+            AND p.predicted_date > f.date 
+            AND p.predicted_date <= f.date + interval '4 days'
         WHERE f.ticker = %s 
           AND (p.predicted_date IS NULL OR p.actual_close IS NULL)
         ORDER BY f.date ASC

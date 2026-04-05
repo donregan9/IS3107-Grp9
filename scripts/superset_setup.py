@@ -108,13 +108,20 @@ CHART_CONFIG = {
         "name":     "Predicted vs Actual Close",
         "viz_type": "echarts_timeseries_line",
         "params": {
-            "x_axis": "ds",
+            "x_axis": "ds",             
+            "granularity_sqla": "ds",    
+            "time_range": "No filter",   
             "metrics": [
-                {"label": "predicted_close", "expressionType": "SIMPLE", "column": {"column_name": "predicted_close"}, "aggregate": "MAX"},
-                {"label": "actual_close",    "expressionType": "SIMPLE", "column": {"column_name": "actual_close"},    "aggregate": "MAX"},
+                {"label": "Predicted", "expressionType": "SIMPLE", "column": {"column_name": "predicted_close"}, "aggregate": "MAX"},
+                {"label": "Actual",    "expressionType": "SIMPLE", "column": {"column_name": "actual_close"},    "aggregate": "MAX"},
+                {"label": "Error", "expressionType": "SIMPLE", "column": {"column_name": "error"}, "aggregate": "MAX"},
+                {"label": "Absolute Error",    "expressionType": "SIMPLE", "column": {"column_name": "abs_error"},    "aggregate": "MAX"},
             ],
             "groupby": [],
             "time_grain_sqla": "P1D",
+            "seriesType": "line",
+            "show_legend": True,
+            "rich_tooltip": True,
         },
     },
     7: {
@@ -181,6 +188,46 @@ CHART_CONFIG = {
             ],
             "groupby": ["dag_id"],
             "time_grain_sqla": "P1D",
+        },
+    },
+    23: {
+        "name":     "Daily Prediction Residuals",
+        "viz_type": "echarts_timeseries_bar",
+        "params": {
+            "x_axis": "ds",
+            "metrics": [
+                {
+                    "label": "Residual Error", 
+                    "expressionType": "SIMPLE", 
+                    "column": {"column_name": "residual_error"}, 
+                    "aggregate": "AVG"
+                },
+            ],
+            "groupby": [],
+            "time_grain_sqla": "P1D",
+            "y_axis_title": "Price Difference ($)",
+            "show_legend": True,
+            # This makes the bars easier to read relative to the 0 line
+            "seriesType": "bar",
+            "opacity": 0.7,
+        },
+    },
+    24: {
+        "name":     "Prediction Error Distribution",
+        "viz_type": "histogram_v2",
+        "params": {
+            # 'column' replaces 'all_columns_x'
+            "column": "prediction_error", 
+            # 'bins' replaces 'link_length'
+            "bins": 25,
+            "query_mode": "raw",
+            "time_range": "No filter",
+            "x_axis_title": "Error ($)", # v2 often uses 'title' instead of 'label'
+            "y_axis_title": "Frequency",
+            "adhoc_filters": [],
+            "row_limit": 1000,
+            "color_scheme": "supersetColors",
+            "show_legend": False,
         },
     },
 }
@@ -315,17 +362,23 @@ def create_dataset(session, database_id, name, sql):
 # Create chart
 # ---------------------------------------------------------------------------
 def create_chart(session, name, viz_type, params, dataset_id):
+    # 1. Inject the 'glue' fields into the params dictionary before stringifying
+    params["datasource"] = f"{dataset_id}__table"
+    params["viz_type"] = viz_type
+    
     payload = {
         "slice_name":      name,
         "viz_type":        viz_type,
         "datasource_id":   dataset_id,
         "datasource_type": "table",
-        "params":          json.dumps(params),
+        "params":          json.dumps(params), # This now contains the injected keys
     }
+    
     resp = session.post(f"{SUPERSET_URL}/api/v1/chart/", json=payload)
     if not resp.ok:
         print(f"  ✗ Failed to create chart '{name}': {resp.status_code} — {resp.text}")
         return None
+    
     chart_id = resp.json()["id"]
     print(f"  ✓ Created chart '{name}' (ID {chart_id})")
     return chart_id
