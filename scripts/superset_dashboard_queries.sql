@@ -128,7 +128,14 @@ SELECT
   state,
   COUNT(*) AS run_count
 FROM dag_run
-WHERE dag_id IN ('market_momentum_extraction', 'lstm_daily_prediction', 'lstm_weekly_training')
+WHERE dag_id IN (
+  'market_momentum_extraction',
+  'lstm_daily_prediction',
+  'lstm_weekly_training',
+  'backfill_historical_data',
+  'backfill_predictions',
+  'missed_predictions'
+)
 GROUP BY dag_id, state
 ORDER BY dag_id, state;
 
@@ -138,7 +145,7 @@ SELECT
   execution_date::date AS run_date,
   EXTRACT(EPOCH FROM (end_date - start_date)) / 60.0 AS duration_minutes
 FROM dag_run
-WHERE dag_id IN ('market_momentum_extraction', 'lstm_daily_prediction', 'lstm_weekly_training')
+WHERE dag_id IN ('market_momentum_extraction', 'lstm_daily_prediction', 'lstm_weekly_training', 'backfill_historical_data', 'backfill_predictions', 'missed_predictions')
   AND state = 'success'
   AND start_date IS NOT NULL
   AND end_date IS NOT NULL
@@ -368,7 +375,7 @@ WHERE ticker = 'AAPL'
   AND volatility_14 IS NOT NULL
 ORDER BY ds;
 
--- 13) Latest price date (Live Status card)
+-- 23) Latest price date (Live Status card)
 SELECT
   ticker,
   MAX(date) AS latest_price_date
@@ -376,7 +383,7 @@ FROM stock_prices
 GROUP BY ticker
 ORDER BY ticker;
 
--- 14) Latest feature date (Live Status card)
+-- 24) Latest feature date (Live Status card)
 SELECT
   ticker,
   MAX(date) AS latest_feature_date
@@ -384,7 +391,7 @@ FROM stock_features
 GROUP BY ticker
 ORDER BY ticker;
 
--- 15) Latest prediction date (Live Status card)
+-- 25) Latest prediction date (Live Status card)
 SELECT
   ticker,
   model_version,
