@@ -162,14 +162,22 @@ CHART_CONFIG = {
         },
     },
     11: {
-        "name":     "DAG Reliability",
-        "viz_type": "echarts_bar",
-        "params": {
-            "groupby": ["dag_id", "state"],
-            "metrics": [
-                {"label": "run_count", "expressionType": "SIMPLE", "column": {"column_name": "run_count"}, "aggregate": "SUM"},
-            ],
-        },
+    "name": "DAG Reliability",
+    "viz_type": "echarts_timeseries_bar",
+    "params": {
+        "groupby": ["state"],
+        "metrics": [
+            {
+                "label": "run_count",
+                "expressionType": "SIMPLE",
+                "column": {"column_name": "run_count"},
+                "aggregate": "SUM"
+            }
+        ],
+        "x_axis": "dag_id",
+        "stack": "Stack",
+        "color_scheme": "d3Category10"
+    }
     },
     12: {
         "name":     "DAG Run Duration Trend",
@@ -181,6 +189,33 @@ CHART_CONFIG = {
             ],
             "groupby": ["dag_id"],
             "time_grain_sqla": "P1D",
+        },
+    },
+    23: {
+        "name":     "Latest Price Date",
+        "viz_type": "table",
+        "params": {
+            "all_columns": ["ticker", "latest_price_date"],
+            "groupby": [],
+            "row_limit": 1000,
+        },
+    },
+    24: {
+        "name":     "Latest Feature Date",
+        "viz_type": "table",
+        "params": {
+            "all_columns": ["ticker", "latest_feature_date"],
+            "groupby": [],
+            "row_limit": 1000,
+        },
+    },
+    25: {
+        "name":     "Latest Prediction Date",
+        "viz_type": "table",
+        "params": {
+            "all_columns": ["ticker", "model_version", "latest_prediction_date"],
+            "groupby": [],
+            "row_limit": 1000,
         },
     },
 }
