@@ -198,6 +198,15 @@ CHART_CONFIG = {
             "time_grain_sqla": "P1D",
         },
     },
+    23: {
+        "name":     "Latest Price Date",
+        "viz_type": "table",
+        "params": {
+            "all_columns": ["ticker", "latest_price_date"],
+            "groupby": [],
+            "row_limit": 1000,
+        },
+    },
     24: {
         "name":     "Latest Feature Date",
         "viz_type": "table",
