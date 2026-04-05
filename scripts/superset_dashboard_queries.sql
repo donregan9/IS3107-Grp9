@@ -375,6 +375,7 @@ WHERE ticker = 'AAPL'
   AND volatility_14 IS NOT NULL
 ORDER BY ds;
 
+
 -- 23) Latest price date (Live Status card)
 SELECT
   ticker,
@@ -399,3 +400,19 @@ SELECT
 FROM model_predictions
 GROUP BY ticker, model_version
 ORDER BY ticker, model_version;
+
+-- 26) Prediction Residuals (Predicted - Actual)
+SELECT 
+    predicted_date AS ds,
+    ticker,
+    model_version,
+    (predicted_close - actual_close) AS residual_error
+FROM model_predictions
+WHERE actual_close IS NOT NULL
+ORDER BY ds ASC;
+
+-- 27) Prediction Error Distribution (Histogram)
+SELECT 
+    (predicted_close - actual_close) AS prediction_error
+FROM model_predictions
+WHERE actual_close IS NOT NULL;
