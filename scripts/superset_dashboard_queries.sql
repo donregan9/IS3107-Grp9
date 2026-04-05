@@ -128,7 +128,14 @@ SELECT
   state,
   COUNT(*) AS run_count
 FROM dag_run
-WHERE dag_id IN ('market_momentum_extraction', 'lstm_daily_prediction', 'lstm_weekly_training')
+WHERE dag_id IN (
+  'market_momentum_extraction',
+  'lstm_daily_prediction',
+  'lstm_weekly_training',
+  'backfill_historical_data',
+  'backfill_predictions',
+  'missed_predictions'
+)
 GROUP BY dag_id, state
 ORDER BY dag_id, state;
 

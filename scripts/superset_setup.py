@@ -37,140 +37,24 @@ DASHBOARD_TITLE = "AAPL Stock Prediction Dashboard"
 # Chart config: name, viz_type, and full params (x-axis + metrics)
 # ---------------------------------------------------------------------------
 CHART_CONFIG = {
-    1: {
-        "name":     "Price Trend with Moving Averages",
-        "viz_type": "echarts_timeseries_line",
-        "params": {
-            "x_axis": "ds",
-            "metrics": [
-                {"label": "close",  "expressionType": "SIMPLE", "column": {"column_name": "close"},  "aggregate": "MAX"},
-                {"label": "sma_20", "expressionType": "SIMPLE", "column": {"column_name": "sma_20"}, "aggregate": "MAX"},
-                {"label": "sma_50", "expressionType": "SIMPLE", "column": {"column_name": "sma_50"}, "aggregate": "MAX"},
-                {"label": "ema_12", "expressionType": "SIMPLE", "column": {"column_name": "ema_12"}, "aggregate": "MAX"},
-                {"label": "ema_26", "expressionType": "SIMPLE", "column": {"column_name": "ema_26"}, "aggregate": "MAX"},
-            ],
-            "groupby": [],
-            "time_grain_sqla": "P1D",
-        },
-    },
-    2: {
-        "name":     "Candlestick OHLCV",
-        "viz_type": "echarts_candlestick",
-        "params": {
-            "x_axis": "ds",
-            "open":   {"label": "open",  "expressionType": "SIMPLE", "column": {"column_name": "open"},  "aggregate": "MAX"},
-            "close":  {"label": "close", "expressionType": "SIMPLE", "column": {"column_name": "close"}, "aggregate": "MAX"},
-            "high":   {"label": "high",  "expressionType": "SIMPLE", "column": {"column_name": "high"},  "aggregate": "MAX"},
-            "low":    {"label": "low",   "expressionType": "SIMPLE", "column": {"column_name": "low"},   "aggregate": "MAX"},
-            "time_grain_sqla": "P1D",
-        },
-    },
-    3: {
-        "name":     "RSI Momentum",
-        "viz_type": "echarts_timeseries_line",
-        "params": {
-            "x_axis": "ds",
-            "metrics": [
-                {"label": "rsi_14", "expressionType": "SIMPLE", "column": {"column_name": "rsi_14"}, "aggregate": "MAX"},
-            ],
-            "groupby": [],
-            "time_grain_sqla": "P1D",
-        },
-    },
-    4: {
-        "name":     "MACD vs Signal",
-        "viz_type": "echarts_timeseries_line",
-        "params": {
-            "x_axis": "ds",
-            "metrics": [
-                {"label": "macd",        "expressionType": "SIMPLE", "column": {"column_name": "macd"},        "aggregate": "MAX"},
-                {"label": "macd_signal", "expressionType": "SIMPLE", "column": {"column_name": "macd_signal"}, "aggregate": "MAX"},
-            ],
-            "groupby": [],
-            "time_grain_sqla": "P1D",
-        },
-    },
-    5: {
-        "name":     "Bollinger Bands",
-        "viz_type": "echarts_timeseries_line",
-        "params": {
-            "x_axis": "ds",
-            "metrics": [
-                {"label": "close",    "expressionType": "SIMPLE", "column": {"column_name": "close"},    "aggregate": "MAX"},
-                {"label": "bb_upper", "expressionType": "SIMPLE", "column": {"column_name": "bb_upper"}, "aggregate": "MAX"},
-                {"label": "bb_lower", "expressionType": "SIMPLE", "column": {"column_name": "bb_lower"}, "aggregate": "MAX"},
-            ],
-            "groupby": [],
-            "time_grain_sqla": "P1D",
-        },
-    },
-    6: {
-        "name":     "Predicted vs Actual Close",
-        "viz_type": "echarts_timeseries_line",
-        "params": {
-            "x_axis": "ds",
-            "metrics": [
-                {"label": "predicted_close", "expressionType": "SIMPLE", "column": {"column_name": "predicted_close"}, "aggregate": "MAX"},
-                {"label": "actual_close",    "expressionType": "SIMPLE", "column": {"column_name": "actual_close"},    "aggregate": "MAX"},
-            ],
-            "groupby": [],
-            "time_grain_sqla": "P1D",
-        },
-    },
-    7: {
-        "name":     "Prediction Quality by Model Version",
-        "viz_type": "echarts_bar",
-        "params": {
-            "groupby": ["model_version"],
-            "metrics": [
-                {"label": "mae",  "expressionType": "SIMPLE", "column": {"column_name": "mae"},  "aggregate": "MAX"},
-                {"label": "rmse", "expressionType": "SIMPLE", "column": {"column_name": "rmse"}, "aggregate": "MAX"},
-            ],
-        },
-    },
-    8: {
-        "name":     "Rolling 7D Directional Accuracy",
-        "viz_type": "echarts_timeseries_line",
-        "params": {
-            "x_axis": "ds",
-            "metrics": [
-                {"label": "rolling_7d_directional_accuracy", "expressionType": "SIMPLE", "column": {"column_name": "rolling_7d_directional_accuracy"}, "aggregate": "MAX"},
-            ],
-            "groupby": [],
-            "time_grain_sqla": "P1D",
-        },
-    },
-    9: {
-        "name":     "Daily Return Distribution",
-        "viz_type": "Histogram",
-        "params": {
-            "all_columns": ["daily_return"],
-            "groupby": [],
-        },
-    },
-    10: {
-        "name":     "Pipeline Freshness Scorecard",
-        "viz_type": "table",
-        "params": {
-            "all_columns": [
-                "latest_price_date",
-                "latest_feature_date",
-                "latest_prediction_date",
-                "checked_at",
-            ],
-            "groupby": [],
-        },
-    },
     11: {
-        "name":     "DAG Reliability",
-        "viz_type": "echarts_bar",
-        "params": {
-            "groupby": ["dag_id", "state"],
-            "metrics": [
-                {"label": "run_count", "expressionType": "SIMPLE", "column": {"column_name": "run_count"}, "aggregate": "SUM"},
-            ],
-        },
-    },
+    "name": "DAG Reliability",
+    "viz_type": "echarts_timeseries_bar",  
+    "params": {
+        "groupby": ["state"],      
+        "metrics": [
+            {
+                "label": "run_count",
+                "expressionType": "SIMPLE",
+                "column": {"column_name": "run_count"},
+                "aggregate": "SUM"
+            }
+        ],
+        "x_axis": "dag_id",       
+        "stack": "Stack",          
+        "color_scheme": "d3Category10"  
+    }
+},
     12: {
         "name":     "DAG Run Duration Trend",
         "viz_type": "echarts_timeseries_line",
