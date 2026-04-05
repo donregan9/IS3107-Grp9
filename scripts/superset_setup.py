@@ -169,14 +169,22 @@ CHART_CONFIG = {
         },
     },
     11: {
-        "name":     "DAG Reliability",
-        "viz_type": "echarts_bar",
-        "params": {
-            "groupby": ["dag_id", "state"],
-            "metrics": [
-                {"label": "run_count", "expressionType": "SIMPLE", "column": {"column_name": "run_count"}, "aggregate": "SUM"},
-            ],
-        },
+    "name": "DAG Reliability",
+    "viz_type": "echarts_timeseries_bar",
+    "params": {
+        "groupby": ["state"],
+        "metrics": [
+            {
+                "label": "run_count",
+                "expressionType": "SIMPLE",
+                "column": {"column_name": "run_count"},
+                "aggregate": "SUM"
+            }
+        ],
+        "x_axis": "dag_id",
+        "stack": "Stack",
+        "color_scheme": "d3Category10"
+    }
     },
     12: {
         "name":     "DAG Run Duration Trend",
@@ -190,7 +198,25 @@ CHART_CONFIG = {
             "time_grain_sqla": "P1D",
         },
     },
-    23: {
+    24: {
+        "name":     "Latest Feature Date",
+        "viz_type": "table",
+        "params": {
+            "all_columns": ["ticker", "latest_feature_date"],
+            "groupby": [],
+            "row_limit": 1000,
+        },
+    },
+    25: {
+        "name":     "Latest Prediction Date",
+        "viz_type": "table",
+        "params": {
+            "all_columns": ["ticker", "model_version", "latest_prediction_date"],
+            "groupby": [],
+            "row_limit": 1000,
+        },
+    },
+    26: {
         "name":     "Daily Prediction Residuals",
         "viz_type": "echarts_timeseries_bar",
         "params": {
@@ -212,7 +238,7 @@ CHART_CONFIG = {
             "opacity": 0.7,
         },
     },
-    24: {
+    27: {
         "name":     "Prediction Error Distribution",
         "viz_type": "histogram_v2",
         "params": {
@@ -228,6 +254,13 @@ CHART_CONFIG = {
             "row_limit": 1000,
             "color_scheme": "supersetColors",
             "show_legend": False,
+        "name":     "Latest Price Date",
+        "viz_type": "table",
+        "params": {
+            "all_columns": ["ticker", "latest_price_date"],
+            "groupby": [],
+            "row_limit": 1000,
+        },
         },
     },
 }

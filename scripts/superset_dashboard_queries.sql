@@ -128,7 +128,14 @@ SELECT
   state,
   COUNT(*) AS run_count
 FROM dag_run
-WHERE dag_id IN ('market_momentum_extraction', 'lstm_daily_prediction', 'lstm_weekly_training')
+WHERE dag_id IN (
+  'market_momentum_extraction',
+  'lstm_daily_prediction',
+  'lstm_weekly_training',
+  'backfill_historical_data',
+  'backfill_predictions',
+  'missed_predictions'
+)
 GROUP BY dag_id, state
 ORDER BY dag_id, state;
 
@@ -138,7 +145,7 @@ SELECT
   execution_date::date AS run_date,
   EXTRACT(EPOCH FROM (end_date - start_date)) / 60.0 AS duration_minutes
 FROM dag_run
-WHERE dag_id IN ('market_momentum_extraction', 'lstm_daily_prediction', 'lstm_weekly_training')
+WHERE dag_id IN ('market_momentum_extraction', 'lstm_daily_prediction', 'lstm_weekly_training', 'backfill_historical_data', 'backfill_predictions', 'missed_predictions')
   AND state = 'success'
   AND start_date IS NOT NULL
   AND end_date IS NOT NULL
@@ -368,7 +375,33 @@ WHERE ticker = 'AAPL'
   AND volatility_14 IS NOT NULL
 ORDER BY ds;
 
--- 23) Prediction Residuals (Predicted - Actual)
+
+-- 23) Latest price date (Live Status card)
+SELECT
+  ticker,
+  MAX(date) AS latest_price_date
+FROM stock_prices
+GROUP BY ticker
+ORDER BY ticker;
+
+-- 24) Latest feature date (Live Status card)
+SELECT
+  ticker,
+  MAX(date) AS latest_feature_date
+FROM stock_features
+GROUP BY ticker
+ORDER BY ticker;
+
+-- 25) Latest prediction date (Live Status card)
+SELECT
+  ticker,
+  model_version,
+  MAX(predicted_date) AS latest_prediction_date
+FROM model_predictions
+GROUP BY ticker, model_version
+ORDER BY ticker, model_version;
+
+-- 26) Prediction Residuals (Predicted - Actual)
 SELECT 
     predicted_date AS ds,
     ticker,
@@ -378,7 +411,7 @@ FROM model_predictions
 WHERE actual_close IS NOT NULL
 ORDER BY ds ASC;
 
--- 24) Prediction Error Distribution (Histogram)
+-- 27) Prediction Error Distribution (Histogram)
 SELECT 
     (predicted_close - actual_close) AS prediction_error
 FROM model_predictions
