@@ -5,6 +5,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.datasets import Dataset
 from datetime import datetime, timedelta
+import json
 import requests
 import psycopg2
 from psycopg2.extras import execute_values
@@ -23,6 +24,11 @@ DB_PORT     = os.getenv('DB_PORT', '5432')
 
 ALPHA_VANTAGE_API_KEY = os.getenv('ALPHAVANTAGE_API_KEY', 'XHD8MQIGSGDCPGSY')
 FEATURES_READY_DATASET = Dataset('dataset://stock_features/aapl/ready')
+API_TIMEOUT_SECONDS = 30
+MAX_REJECT_RATIO = 0.20
+MAX_API_STALENESS_DAYS = 5
+MIN_INCREMENTAL_COMPLETENESS = 0.90
+MAX_SOURCE_NULL_RATIO = 0.01
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -54,6 +60,130 @@ def upsert_values(values):
     conn.commit()
     cursor.close()
     conn.close()
+
+
+def _log_data_quality_check(
+    check_name,
+    status,
+    context=None,
+    ticker=None,
+    observed_value=None,
+    threshold=None,
+    failed_count=0,
+    details=None,
+):
+    """Persist one data-quality check result for observability and audit."""
+    run_id = None
+    dag_id = None
+    task_id = None
+
+    if context:
+        run_id = context.get('run_id')
+        task_instance = context.get('task_instance')
+        if task_instance:
+            dag_id = task_instance.dag_id
+            task_id = task_instance.task_id
+
+    details_text = details if isinstance(details, str) else json.dumps(details or {})
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO data_quality_results
+                (dag_id, task_id, run_id, ticker, check_name, status,
+                 observed_value, threshold, failed_count, details)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                dag_id,
+                task_id,
+                run_id,
+                ticker,
+                check_name,
+                status,
+                observed_value,
+                threshold,
+                failed_count,
+                details_text,
+            ),
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as exc:
+        print(f"Warning: failed to write data quality check '{check_name}': {exc}")
+
+
+def _fetch_alpha_vantage_daily(ticker, outputsize='compact'):
+    """Fetch daily OHLCV payload and validate API-level response integrity."""
+    url = (
+        f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY'
+        f'&symbol={ticker}&outputsize={outputsize}&apikey={ALPHA_VANTAGE_API_KEY}'
+    )
+    try:
+        response = requests.get(url, timeout=API_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Alpha Vantage request failed for {ticker}: {exc}") from exc
+    except ValueError as exc:
+        raise RuntimeError(f"Alpha Vantage returned non-JSON payload for {ticker}") from exc
+
+    if not isinstance(data, dict):
+        raise RuntimeError("Alpha Vantage response is not a JSON object")
+
+    if data.get('Error Message'):
+        raise RuntimeError(f"Alpha Vantage API error for {ticker}: {data['Error Message']}")
+
+    if data.get('Note'):
+        raise RuntimeError(f"Alpha Vantage rate limit or notice for {ticker}: {data['Note']}")
+
+    time_series = data.get('Time Series (Daily)')
+    if not isinstance(time_series, dict) or not time_series:
+        raise RuntimeError(f"Alpha Vantage response missing Time Series (Daily) for {ticker}")
+
+    return time_series
+
+
+def _validate_and_build_price_record(ticker, date_str, row):
+    """Validate one OHLCV row and return a DB record tuple or a rejection reason."""
+    required_fields = ('1. open', '2. high', '3. low', '4. close', '5. volume')
+
+    try:
+        datetime.strptime(date_str, '%Y-%m-%d')
+    except Exception:
+        return None, 'invalid_date'
+
+    if not isinstance(row, dict):
+        return None, 'invalid_row_type'
+
+    missing_fields = [field for field in required_fields if field not in row]
+    if missing_fields:
+        return None, 'missing_fields'
+
+    try:
+        open_price = float(row['1. open'])
+        high_price = float(row['2. high'])
+        low_price = float(row['3. low'])
+        close_price = float(row['4. close'])
+        volume = int(float(row['5. volume']))
+    except (TypeError, ValueError):
+        return None, 'type_conversion_error'
+
+    if min(open_price, high_price, low_price, close_price) <= 0:
+        return None, 'non_positive_price'
+    if volume < 0:
+        return None, 'negative_volume'
+    if high_price < low_price:
+        return None, 'high_below_low'
+    if not (low_price <= open_price <= high_price):
+        return None, 'open_outside_high_low'
+    if not (low_price <= close_price <= high_price):
+        return None, 'close_outside_high_low'
+
+    return (ticker, date_str, open_price, high_price, low_price, close_price, volume), None
 
 # ---------------------------------------------------------------------------
 # Task 1 – create_table
@@ -149,6 +279,23 @@ def create_table():
                 notes           TEXT,
                 created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS data_quality_results (
+                id             SERIAL PRIMARY KEY,
+                dag_id         VARCHAR(255),
+                task_id        VARCHAR(255),
+                run_id         VARCHAR(255),
+                ticker         VARCHAR(10),
+                check_name     VARCHAR(100) NOT NULL,
+                status         VARCHAR(20) NOT NULL,
+                observed_value FLOAT,
+                threshold      FLOAT,
+                failed_count   INTEGER DEFAULT 0,
+                details        TEXT,
+                created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_dq_run ON data_quality_results(run_id);
+            CREATE INDEX IF NOT EXISTS idx_dq_check ON data_quality_results(check_name);
         """)
         conn.commit()
         cursor.close()
@@ -179,6 +326,24 @@ def compute_and_store_features(ticker, **context):
         if df.empty or len(df) < 26:
             print(f"Not enough data to compute features for {ticker} (need at least 26 rows, have {len(df)}).")
             return {"status": "skipped", "records": 0}
+
+        source_null_rows = int(df[['close', 'volume']].isnull().any(axis=1).sum())
+        source_null_ratio = source_null_rows / len(df)
+        _log_data_quality_check(
+            check_name='source_base_null_ratio',
+            status='pass' if source_null_ratio <= MAX_SOURCE_NULL_RATIO else 'fail',
+            context=context,
+            ticker=ticker,
+            observed_value=source_null_ratio,
+            threshold=MAX_SOURCE_NULL_RATIO,
+            failed_count=source_null_rows,
+            details={'rows': len(df), 'null_rows': source_null_rows}
+        )
+        if source_null_ratio > MAX_SOURCE_NULL_RATIO:
+            raise ValueError(
+                f"Source null ratio too high for {ticker}: {source_null_ratio:.2%} "
+                f"(threshold {MAX_SOURCE_NULL_RATIO:.0%})"
+            )
 
         df['date'] = pd.to_datetime(df['date']).dt.date
         df = df.sort_values('date').reset_index(drop=True)
@@ -215,6 +380,76 @@ def compute_and_store_features(ticker, **context):
 
         # Drop rows where indicators are NaN (not enough history yet)
         df = df.dropna()
+
+        if df.empty:
+            _log_data_quality_check(
+                check_name='feature_rows_after_dropna',
+                status='fail',
+                context=context,
+                ticker=ticker,
+                observed_value=0.0,
+                failed_count=1,
+                details={'message': 'No feature rows remain after dropna'}
+            )
+            raise ValueError(f"No feature rows remain after dropna for {ticker}.")
+
+        _log_data_quality_check(
+            check_name='feature_rows_after_dropna',
+            status='pass',
+            context=context,
+            ticker=ticker,
+            observed_value=float(len(df)),
+            details={'message': 'Feature rows available for upsert'}
+        )
+
+        feature_cols = [
+            'close', 'daily_return', 'sma_20', 'sma_50', 'ema_12', 'ema_26',
+            'macd', 'macd_signal', 'rsi_14', 'bb_upper', 'bb_lower',
+            'volatility_14', 'volume_sma_20', 'bb_width', 'volume_ratio_20',
+            'return_3d', 'return_5d'
+        ]
+
+        feature_null_cells = int(df[feature_cols].isnull().sum().sum())
+        _log_data_quality_check(
+            check_name='feature_null_cells',
+            status='pass' if feature_null_cells == 0 else 'fail',
+            context=context,
+            ticker=ticker,
+            observed_value=float(feature_null_cells),
+            threshold=0.0,
+            failed_count=feature_null_cells,
+            details={'feature_columns': feature_cols}
+        )
+        if feature_null_cells > 0:
+            raise ValueError(f"Feature dataframe has {feature_null_cells} null cells after dropna for {ticker}.")
+
+        rsi_out_of_range = int(((df['rsi_14'] < 0) | (df['rsi_14'] > 100)).sum())
+        _log_data_quality_check(
+            check_name='rsi_range_check',
+            status='pass' if rsi_out_of_range == 0 else 'fail',
+            context=context,
+            ticker=ticker,
+            observed_value=float(rsi_out_of_range),
+            threshold=0.0,
+            failed_count=rsi_out_of_range,
+            details={'expected_range': '[0, 100]'}
+        )
+        if rsi_out_of_range > 0:
+            raise ValueError(f"RSI out-of-range rows detected for {ticker}: {rsi_out_of_range}")
+
+        negative_volatility_rows = int((df['volatility_14'] < 0).sum())
+        _log_data_quality_check(
+            check_name='volatility_non_negative',
+            status='pass' if negative_volatility_rows == 0 else 'fail',
+            context=context,
+            ticker=ticker,
+            observed_value=float(negative_volatility_rows),
+            threshold=0.0,
+            failed_count=negative_volatility_rows,
+            details={'column': 'volatility_14'}
+        )
+        if negative_volatility_rows > 0:
+            raise ValueError(f"Negative volatility rows detected for {ticker}: {negative_volatility_rows}")
 
         # Build upsert values
         values = [
@@ -258,8 +493,24 @@ def compute_and_store_features(ticker, **context):
         conn.close()
 
         print(f"Upserted {len(values)} feature rows for {ticker}.")
+        _log_data_quality_check(
+            check_name='feature_rows_upserted',
+            status='pass',
+            context=context,
+            ticker=ticker,
+            observed_value=float(len(values)),
+            details={'message': 'Feature rows upserted successfully'}
+        )
         return {"status": "success", "records": len(values)}
     except Exception as e:
+        _log_data_quality_check(
+            check_name='feature_engineering_exception',
+            status='fail',
+            context=context,
+            ticker=ticker,
+            failed_count=1,
+            details={'error': str(e)}
+        )
         print(f"Feature engineering error: {e}")
         return {"status": "failed", "error": str(e)}
 
@@ -274,31 +525,73 @@ def fetch_and_store_stock_data(ticker, **context):
         date_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         print(f"Fetching {ticker} for {date_str} from Alpha Vantage...")
 
-        url = (
-            f'https://www.alphavantage.co/query'
-            f'?function=TIME_SERIES_DAILY'
-            f'&symbol={ticker}'
-            f'&apikey={ALPHA_VANTAGE_API_KEY}'
+        time_series = _fetch_alpha_vantage_daily(ticker, outputsize='compact')
+        _log_data_quality_check(
+            check_name='api_payload_valid',
+            status='pass',
+            context=context,
+            ticker=ticker,
+            observed_value=float(len(time_series)),
+            details={'message': 'Time Series payload retrieved successfully'}
         )
-        data = requests.get(url).json()
-        time_series = data.get("Time Series (Daily)", {})
 
         if date_str not in time_series:
             print(f"No data for {ticker} on {date_str} (non-trading day?).")
+            _log_data_quality_check(
+                check_name='daily_row_present',
+                status='pass',
+                context=context,
+                ticker=ticker,
+                observed_value=0.0,
+                details={'message': 'No row for target date (likely non-trading day)'}
+            )
             return {"status": "no_data", "records": 0}
 
         row = time_series[date_str]
-        values = [(
-            ticker, date_str,
-            float(row['1. open']), float(row['2. high']),
-            float(row['3. low']),  float(row['4. close']),
-            int(row['5. volume'])
-        )]
+        record, reason = _validate_and_build_price_record(ticker, date_str, row)
+        if reason:
+            _log_data_quality_check(
+                check_name='daily_row_validation',
+                status='fail',
+                context=context,
+                ticker=ticker,
+                observed_value=1.0,
+                failed_count=1,
+                details={'reason': reason, 'date': date_str}
+            )
+            raise ValueError(f"Rejected daily row for {ticker} on {date_str}: {reason}")
+
+        _log_data_quality_check(
+            check_name='daily_row_validation',
+            status='pass',
+            context=context,
+            ticker=ticker,
+            observed_value=1.0,
+            details={'date': date_str}
+        )
+
+        values = [record]
 
         upsert_values(values)
         print(f"Upserted 1 record for {ticker} on {date_str}.")
+        _log_data_quality_check(
+            check_name='rows_upserted',
+            status='pass',
+            context=context,
+            ticker=ticker,
+            observed_value=1.0,
+            details={'message': 'Daily row upserted successfully'}
+        )
         return {"status": "success", "records": 1}
     except Exception as e:
+        _log_data_quality_check(
+            check_name='daily_ingestion_exception',
+            status='fail',
+            context=context,
+            ticker=ticker,
+            failed_count=1,
+            details={'error': str(e)}
+        )
         print(f"Daily fetch error: {e}")
         return {"status": "failed", "error": str(e)}
     
@@ -321,27 +614,186 @@ def smart_fetch_and_store(ticker, **context):
     
     print(f"Last data point in DB: {last_date}. Fetching updates...")
 
-    url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&outputsize=compact&apikey={ALPHA_VANTAGE_API_KEY}'
-    data = requests.get(url).json()
-    time_series = data.get("Time Series (Daily)", {})
+    time_series = _fetch_alpha_vantage_daily(ticker, outputsize='compact')
+    _log_data_quality_check(
+        check_name='api_payload_valid',
+        status='pass',
+        context=context,
+        ticker=ticker,
+        observed_value=float(len(time_series)),
+        details={'message': 'Time Series payload retrieved successfully'}
+    )
+
+    api_dates = []
+    invalid_api_date_keys = 0
+    for date_str in time_series.keys():
+        try:
+            api_dates.append(datetime.strptime(date_str, '%Y-%m-%d').date())
+        except ValueError:
+            invalid_api_date_keys += 1
+
+    if invalid_api_date_keys:
+        _log_data_quality_check(
+            check_name='api_date_key_format',
+            status='fail',
+            context=context,
+            ticker=ticker,
+            observed_value=float(invalid_api_date_keys),
+            threshold=0.0,
+            failed_count=invalid_api_date_keys,
+            details={'message': 'Invalid date keys detected in API payload'}
+        )
+
+    if api_dates:
+        latest_api_date = max(api_dates)
+        api_staleness_days = (datetime.now().date() - latest_api_date).days
+        _log_data_quality_check(
+            check_name='api_freshness',
+            status='pass' if api_staleness_days <= MAX_API_STALENESS_DAYS else 'fail',
+            context=context,
+            ticker=ticker,
+            observed_value=float(api_staleness_days),
+            threshold=float(MAX_API_STALENESS_DAYS),
+            failed_count=1 if api_staleness_days > MAX_API_STALENESS_DAYS else 0,
+            details={'latest_api_date': latest_api_date.isoformat()}
+        )
+        if api_staleness_days > MAX_API_STALENESS_DAYS:
+            raise ValueError(
+                f"API data is stale for {ticker}: latest={latest_api_date}, "
+                f"staleness={api_staleness_days} days."
+            )
+
+        if latest_api_date > last_date:
+            expected_new_market_days = len(
+                pd.bdate_range(start=last_date + timedelta(days=1), end=latest_api_date)
+            )
+            available_new_market_days = len({d for d in api_dates if last_date < d <= latest_api_date})
+            completeness_ratio = (
+                (available_new_market_days / expected_new_market_days)
+                if expected_new_market_days > 0 else 1.0
+            )
+            _log_data_quality_check(
+                check_name='incremental_completeness',
+                status='pass' if completeness_ratio >= MIN_INCREMENTAL_COMPLETENESS else 'fail',
+                context=context,
+                ticker=ticker,
+                observed_value=completeness_ratio,
+                threshold=MIN_INCREMENTAL_COMPLETENESS,
+                failed_count=max(expected_new_market_days - available_new_market_days, 0),
+                details={
+                    'expected_market_days': expected_new_market_days,
+                    'available_market_days': available_new_market_days,
+                    'window_start': (last_date + timedelta(days=1)).isoformat(),
+                    'window_end': latest_api_date.isoformat()
+                }
+            )
+            if completeness_ratio < MIN_INCREMENTAL_COMPLETENESS:
+                raise ValueError(
+                    f"Incremental completeness too low for {ticker}: {completeness_ratio:.1%} "
+                    f"(threshold {MIN_INCREMENTAL_COMPLETENESS:.0%})."
+                )
 
     new_records = []
+    rejected_records = 0
+    rejected_reasons = {}
+
     for date_str, row in time_series.items():
-        curr_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        try:
+            curr_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            rejected_records += 1
+            rejected_reasons['invalid_date'] = rejected_reasons.get('invalid_date', 0) + 1
+            continue
         
         # ONLY grab data newer than what we have
         if curr_date > last_date:
-            new_records.append((
-                ticker, date_str,
-                float(row['1. open']), float(row['2. high']),
-                float(row['3. low']),  float(row['4. close']),
-                int(row['5. volume'])
-            ))
+            record, reason = _validate_and_build_price_record(ticker, date_str, row)
+            if reason:
+                rejected_records += 1
+                rejected_reasons[reason] = rejected_reasons.get(reason, 0) + 1
+                continue
+            new_records.append(record)
+
+    total_candidate_rows = len(new_records) + rejected_records
+
+    if total_candidate_rows > 0:
+        _log_data_quality_check(
+            check_name='row_validation',
+            status='pass' if rejected_records == 0 else 'fail',
+            context=context,
+            ticker=ticker,
+            observed_value=float(total_candidate_rows),
+            threshold=MAX_REJECT_RATIO,
+            failed_count=rejected_records,
+            details={
+                'accepted_rows': len(new_records),
+                'rejected_rows': rejected_records,
+                'reasons': rejected_reasons
+            }
+        )
+
+    if rejected_records:
+        print(
+            f"Validation rejected {rejected_records}/{total_candidate_rows} new rows for {ticker}. "
+            f"Reasons: {rejected_reasons}"
+        )
+
+    if rejected_records and not new_records:
+        _log_data_quality_check(
+            check_name='all_candidate_rows_rejected',
+            status='fail',
+            context=context,
+            ticker=ticker,
+            observed_value=float(total_candidate_rows),
+            failed_count=rejected_records,
+            details={'reasons': rejected_reasons}
+        )
+        raise ValueError(
+            f"All candidate rows failed validation for {ticker}. "
+            f"Reasons: {rejected_reasons}"
+        )
+
+    if total_candidate_rows > 0:
+        reject_ratio = rejected_records / total_candidate_rows
+        if reject_ratio > MAX_REJECT_RATIO:
+            _log_data_quality_check(
+                check_name='reject_ratio_threshold',
+                status='fail',
+                context=context,
+                ticker=ticker,
+                observed_value=reject_ratio,
+                threshold=MAX_REJECT_RATIO,
+                failed_count=rejected_records,
+                details={'reasons': rejected_reasons}
+            )
+            raise ValueError(
+                f"Rejected {rejected_records}/{total_candidate_rows} rows for {ticker} "
+                f"({reject_ratio:.1%}), above threshold {MAX_REJECT_RATIO:.0%}."
+            )
 
     if new_records:
         upsert_values(new_records)
-        print(f"Successfully caught up! Added {len(new_records)} missing days.")
+        _log_data_quality_check(
+            check_name='rows_upserted',
+            status='pass',
+            context=context,
+            ticker=ticker,
+            observed_value=float(len(new_records)),
+            details={'rejected_rows': rejected_records}
+        )
+        print(
+            f"Successfully caught up! Added {len(new_records)} missing days "
+            f"(rejected: {rejected_records})."
+        )
     else:
+        _log_data_quality_check(
+            check_name='rows_upserted',
+            status='pass',
+            context=context,
+            ticker=ticker,
+            observed_value=0.0,
+            details={'message': 'No new rows to upsert'}
+        )
         print("Database is already up to date.")
 
 # ---------------------------------------------------------------------------

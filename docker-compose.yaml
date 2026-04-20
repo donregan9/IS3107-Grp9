@@ -27,6 +27,7 @@ services:
       AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS: 'false'
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
       AIRFLOW__CORE__FERNET_KEY: '7T0gH5NyflLV8zknKMiJeH-xHPXjqH8VJQ7h99Q8N5I='
+      AIRFLOW_CONN_POSTGRES: postgresql://airflow:airflow@postgres:5432/airflow
       _AIRFLOW_DB_UPGRADE: 'true'
       _AIRFLOW_WWW_USER_CREATE: 'true'
       _AIRFLOW_WWW_USER_USERNAME: admin
@@ -52,6 +53,7 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
       AIRFLOW__CORE__FERNET_KEY: '7T0gH5NyflLV8zknKMiJeH-xHPXjqH8VJQ7h99Q8N5I='
+      AIRFLOW_CONN_POSTGRES: postgresql://airflow:airflow@postgres:5432/airflow
       DB_HOST: postgres
       DB_USER: airflow
       DB_PASSWORD: airflow
@@ -85,6 +87,7 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
       AIRFLOW__CORE__FERNET_KEY: '7T0gH5NyflLV8zknKMiJeH-xHPXjqH8VJQ7h99Q8N5I='
+      AIRFLOW_CONN_POSTGRES: postgresql://airflow:airflow@postgres:5432/airflow
       DB_HOST: postgres
       DB_USER: airflow
       DB_PASSWORD: airflow
