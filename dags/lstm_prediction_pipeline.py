@@ -2,11 +2,11 @@
 # Two DAGs for LSTM-based stock price prediction
 #
 #   1. lstm_weekly_training   – runs every Monday at 06:00 UTC
-#      create_table → train_lstm_model
+#      train_lstm_model (parallel per ticker)
 #
-#   2. lstm_daily_prediction  – runs daily at 01:00 UTC
+#   2. lstm_daily_prediction  – runs daily when features are ready
 #      (after market_momentum_extraction has finished and features are fresh)
-#      predict_next_day_close → log_prediction
+#      predict_next_day_close (parallel per ticker)
 #
 # Both DAGs call helpers in scripts/lstm_model.py.
 # ---------------------------------------------------------------------------
@@ -24,8 +24,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
 
 log = logging.getLogger(__name__)
 
-TICKER = 'AAPL'   # change or extend to a list as needed
-FEATURES_READY_DATASET = Dataset('dataset://stock_features/aapl/ready')
+# ---------------------------------------------------------------------------
+# Multi-ticker support
+# ---------------------------------------------------------------------------
+TICKERS = ['AAPL', 'NVDA']  # Add more tickers here to scale
+FEATURES_READY_DATASET = Dataset('dataset://stock_features/ready')  # Shared trigger from market_data_pipeline
 
 # ---------------------------------------------------------------------------
 # Wrapper callables (lazy-import tensorflow inside the task so the Airflow
@@ -52,10 +55,11 @@ def task_predict(ticker: str, **context):
 # ---------------------------------------------------------------------------
 # DAG 1 – Weekly training
 #   Cron: every Monday at 06:00 UTC  →  "0 6 * * 1"
+#   Trains models for all tickers in parallel
 # ---------------------------------------------------------------------------
 with DAG(
     dag_id='lstm_weekly_training',
-    description='Train (or retrain) the LSTM stock-price model every Monday',
+    description='Train (or retrain) LSTM stock-price models for all tickers every Monday',
     start_date=datetime(2026, 1, 1),        # must be in the past for manual triggers to work
     schedule='0 6 * * 1',                   # every Monday 06:00 UTC
     catchup=False,
@@ -65,21 +69,21 @@ with DAG(
     },
 ) as training_dag:
 
-    train_task = PythonOperator(
+    train_task = PythonOperator.partial(
         task_id='train_lstm_model',
         python_callable=task_train_model,
-        op_kwargs={'ticker': TICKER},
-    )
+    ).expand(op_kwargs=[{'ticker': ticker} for ticker in TICKERS])
 
 
 # ---------------------------------------------------------------------------
 # DAG 2 – Daily prediction
 #   Dataset-triggered: runs whenever market_momentum_extraction emits
 #   the features-ready dataset from compute_features.
+#   Predicts for all tickers in parallel.
 # ---------------------------------------------------------------------------
 with DAG(
     dag_id='lstm_daily_prediction',
-    description='Generate next-day close-price prediction using the latest LSTM model',
+    description='Generate next-day close-price predictions for all tickers using latest LSTM models',
     start_date=datetime(2026, 1, 1),
     schedule=[FEATURES_READY_DATASET],
     catchup=False,
@@ -89,8 +93,7 @@ with DAG(
     },
 ) as prediction_dag:
 
-    predict_task = PythonOperator(
+    predict_task = PythonOperator.partial(
         task_id='predict_next_day_close',
         python_callable=task_predict,
-        op_kwargs={'ticker': TICKER},
-    )
+    ).expand(op_kwargs=[{'ticker': ticker} for ticker in TICKERS])
