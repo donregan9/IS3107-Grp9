@@ -1,8 +1,8 @@
 # ---------------------------------------------------------------------------
 # Backfill DAG  (ONE-OFF — trigger manually once, then leave it)
 #
-# This DAG loads the full historical daily OHLCV data for AAPL from
-# Alpha Vantage (up to ~20 years) into the stock_prices table.
+# This DAG loads recent daily OHLCV data for multiple tickers from
+# Alpha Vantage (compact window) into the stock_prices table.
 #
 # How to run:
 #   1. Open the Airflow UI → DAGs → backfill_historical_data
@@ -28,7 +28,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
 from data_validation import (
     fetch_alpha_vantage_daily as _fetch_av_daily_impl,
     validate_and_build_price_record,
-    log_data_quality_check
+    log_data_quality_check,
+    build_raw_price_observation,
+    insert_raw_price_rows,
+    ensure_raw_price_table_exists
 )
 
 # ---------------------------------------------------------------------------
@@ -43,6 +46,11 @@ DB_PORT     = os.getenv('DB_PORT', '5432')
 ALPHA_VANTAGE_API_KEY = os.getenv('ALPHAVANTAGE_API_KEY', 'XHD8MQIGSGDCPGSY')
 API_TIMEOUT_SECONDS = 30
 MAX_REJECT_RATIO = 0.20
+
+# ---------------------------------------------------------------------------
+# Multi-ticker support
+# ---------------------------------------------------------------------------
+TICKERS = ['AAPL', 'NVDA']  # Add more tickers here to scale
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -72,6 +80,25 @@ def _log_data_quality_check(
         check_name, status, context, ticker, observed_value, threshold, failed_count, details
     )
 
+
+def _build_raw_price_observation(
+    ticker, source_date_key, row, context=None, is_valid=None, reject_reason=None, source='alphavantage'
+):
+    """Build one raw-ingestion row tuple for stock_prices_raw."""
+    return build_raw_price_observation(
+        ticker, source_date_key, row, context, is_valid, reject_reason, source
+    )
+
+
+def _insert_raw_price_rows(raw_rows):
+    """Bulk insert raw-ingestion rows into stock_prices_raw."""
+    return insert_raw_price_rows(raw_rows)
+
+
+def _ensure_raw_price_table_exists():
+    """Create stock_prices_raw table if it does not exist yet."""
+    return ensure_raw_price_table_exists()
+
 UPSERT_QUERY = """
     INSERT INTO stock_prices (ticker, date, open, high, low, close, volume)
     VALUES %s
@@ -94,12 +121,13 @@ def upsert_values(values):
 
 # ---------------------------------------------------------------------------
 # Task: backfill_stock_data
-#   Fetches the full daily price history for a ticker using outputsize=full
-#   (~20 years of data) and upserts every row into stock_prices.
+#   Fetches recent daily price history for a ticker using outputsize=compact
+#   and upserts accepted rows into stock_prices.
 # ---------------------------------------------------------------------------
 def backfill_stock_data(ticker, **context):
     try:
-        print(f"Backfilling {ticker} (full history) from Alpha Vantage...")
+        _ensure_raw_price_table_exists()
+        print(f"Backfilling {ticker} (compact history) from Alpha Vantage...")
         # outputsize=compact returns the last 100 trading days (free tier)
         # outputsize=full requires a premium API key (~20 years of data)
         time_series = _fetch_alpha_vantage_daily(ticker, outputsize='compact')
@@ -113,16 +141,38 @@ def backfill_stock_data(ticker, **context):
         )
 
         new_records = []
+        raw_rows = []
         rejected_records = 0
         rejected_reasons = {}
 
         for date_str, row in time_series.items():
             record, reason = _validate_and_build_price_record(ticker, date_str, row)
+            raw_rows.append(
+                _build_raw_price_observation(
+                    ticker=ticker,
+                    source_date_key=date_str,
+                    row=row,
+                    context=context,
+                    is_valid=(reason is None),
+                    reject_reason=reason,
+                )
+            )
             if reason:
                 rejected_records += 1
                 rejected_reasons[reason] = rejected_reasons.get(reason, 0) + 1
                 continue
             new_records.append(record)
+
+        if raw_rows:
+            raw_written = _insert_raw_price_rows(raw_rows)
+            _log_data_quality_check(
+                check_name='raw_rows_written',
+                status='pass',
+                context=context,
+                ticker=ticker,
+                observed_value=float(raw_written),
+                details={'message': 'Raw rows persisted before curated upsert'}
+            )
 
         total_candidate_rows = len(new_records) + rejected_records
 
@@ -310,25 +360,24 @@ def compute_and_store_features(ticker, **context):
 # ---------------------------------------------------------------------------
 # DAG Definition
 #   schedule=None → only runs when manually triggered in the Airflow UI
+#   Backfills all configured tickers in parallel
 # ---------------------------------------------------------------------------
 with DAG(
     dag_id='backfill_historical_data',
     start_date=datetime(2026, 1, 1),
     schedule=None,          # Never runs automatically — manual trigger only
     catchup=False,
-    description='One-off backfill: loads full AAPL price history into PostgreSQL'
+    description='One-off backfill: loads compact stock price history for multiple tickers into PostgreSQL'
 ) as dag:
 
-    backfill_task = PythonOperator(
+    backfill_task = PythonOperator.partial(
         task_id='backfill_stock_data',
-        python_callable=backfill_stock_data,
-        op_kwargs={'ticker': 'AAPL'}
-    )
+        python_callable=backfill_stock_data
+    ).expand(op_kwargs=[{'ticker': ticker} for ticker in TICKERS])
 
-    update_features_task = PythonOperator(
+    update_features_task = PythonOperator.partial(
         task_id='update_stock_features',
-        python_callable=compute_and_store_features,
-        op_kwargs={'ticker': 'AAPL'}
-    )
+        python_callable=compute_and_store_features
+    ).expand(op_kwargs=[{'ticker': ticker} for ticker in TICKERS])
 
     backfill_task >> update_features_task

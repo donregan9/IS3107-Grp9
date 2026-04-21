@@ -3,6 +3,7 @@
 # ---------------------------------------------------------------------------
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.decorators import task
 from airflow.datasets import Dataset
 from datetime import datetime, timedelta
 import sys
@@ -19,7 +20,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
 from data_validation import (
     fetch_alpha_vantage_daily as _fetch_av_daily_impl,
     validate_and_build_price_record,
-    log_data_quality_check
+    log_data_quality_check,
+    build_raw_price_observation,
+    insert_raw_price_rows,
+    ensure_raw_price_table_exists
 )
 
 # ---------------------------------------------------------------------------
@@ -32,12 +36,16 @@ DB_NAME     = os.getenv('DB_NAME', 'airflow')
 DB_PORT     = os.getenv('DB_PORT', '5432')
 
 ALPHA_VANTAGE_API_KEY = os.getenv('ALPHAVANTAGE_API_KEY', 'XHD8MQIGSGDCPGSY')
-FEATURES_READY_DATASET = Dataset('dataset://stock_features/aapl/ready')
 API_TIMEOUT_SECONDS = 30
 MAX_REJECT_RATIO = 0.20
 MAX_API_STALENESS_DAYS = 5
 MIN_INCREMENTAL_COMPLETENESS = 0.90
 MAX_SOURCE_NULL_RATIO = 0.01
+
+# ---------------------------------------------------------------------------
+# Multi-ticker support
+# ---------------------------------------------------------------------------
+TICKERS = ['AAPL', 'NVDA']  # Add more tickers here to scale
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -67,6 +75,25 @@ def _log_data_quality_check(
     return log_data_quality_check(
         check_name, status, context, ticker, observed_value, threshold, failed_count, details
     )
+
+
+def _build_raw_price_observation(
+    ticker, source_date_key, row, context=None, is_valid=None, reject_reason=None, source='alphavantage'
+):
+    """Build one raw-ingestion row tuple for stock_prices_raw."""
+    return build_raw_price_observation(
+        ticker, source_date_key, row, context, is_valid, reject_reason, source
+    )
+
+
+def _insert_raw_price_rows(raw_rows):
+    """Bulk insert raw-ingestion rows into stock_prices_raw."""
+    return insert_raw_price_rows(raw_rows)
+
+
+def _ensure_raw_price_table_exists():
+    """Create stock_prices_raw table if it does not exist yet."""
+    return ensure_raw_price_table_exists()
 
 UPSERT_QUERY = """
     INSERT INTO stock_prices (ticker, date, open, high, low, close, volume)
@@ -200,6 +227,29 @@ def create_table():
             );
             CREATE INDEX IF NOT EXISTS idx_dq_run ON data_quality_results(run_id);
             CREATE INDEX IF NOT EXISTS idx_dq_check ON data_quality_results(check_name);
+
+            CREATE TABLE IF NOT EXISTS stock_prices_raw (
+                id              SERIAL PRIMARY KEY,
+                ticker          VARCHAR(10) NOT NULL,
+                source_date_key VARCHAR(20) NOT NULL,
+                trade_date      DATE,
+                open            FLOAT,
+                high            FLOAT,
+                low             FLOAT,
+                close           FLOAT,
+                volume          BIGINT,
+                raw_payload     JSONB NOT NULL,
+                is_valid        BOOLEAN,
+                reject_reason   VARCHAR(100),
+                source          VARCHAR(50) DEFAULT 'alphavantage',
+                dag_id          VARCHAR(255),
+                task_id         VARCHAR(255),
+                run_id          VARCHAR(255),
+                ingested_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(ticker, source_date_key, run_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_raw_ticker_date ON stock_prices_raw(ticker, trade_date);
+            CREATE INDEX IF NOT EXISTS idx_raw_run_id ON stock_prices_raw(run_id);
         """)
         conn.commit()
         cursor.close()
@@ -426,6 +476,7 @@ def compute_and_store_features(ticker, **context):
 # ---------------------------------------------------------------------------
 def fetch_and_store_stock_data(ticker, **context):
     try:
+        _ensure_raw_price_table_exists()
         date_str = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         print(f"Fetching {ticker} for {date_str} from Alpha Vantage...")
 
@@ -453,6 +504,16 @@ def fetch_and_store_stock_data(ticker, **context):
 
         row = time_series[date_str]
         record, reason = _validate_and_build_price_record(ticker, date_str, row)
+        _insert_raw_price_rows([
+            _build_raw_price_observation(
+                ticker=ticker,
+                source_date_key=date_str,
+                row=row,
+                context=context,
+                is_valid=(reason is None),
+                reject_reason=reason,
+            )
+        ])
         if reason:
             _log_data_quality_check(
                 check_name='daily_row_validation',
@@ -505,6 +566,7 @@ def fetch_and_store_stock_data(ticker, **context):
 # ---------------------------------------------------------------------------
 
 def smart_fetch_and_store(ticker, **context):
+    _ensure_raw_price_table_exists()
     conn = get_connection()
     cur = conn.cursor()
     
@@ -518,7 +580,7 @@ def smart_fetch_and_store(ticker, **context):
     
     print(f"Last data point in DB: {last_date}. Fetching updates...")
 
-    time_series = _fetch_alpha_vantage_daily(ticker, ALPHA_VANTAGE_API_KEY, API_TIMEOUT_SECONDS, outputsize='compact')
+    time_series = _fetch_alpha_vantage_daily(ticker, outputsize='compact')
     _log_data_quality_check(
         check_name='api_payload_valid',
         status='pass',
@@ -598,6 +660,7 @@ def smart_fetch_and_store(ticker, **context):
                 )
 
     new_records = []
+    raw_rows = []
     rejected_records = 0
     rejected_reasons = {}
 
@@ -612,11 +675,32 @@ def smart_fetch_and_store(ticker, **context):
         # ONLY grab data newer than what we have
         if curr_date > last_date:
             record, reason = _validate_and_build_price_record(ticker, date_str, row)
+            raw_rows.append(
+                _build_raw_price_observation(
+                    ticker=ticker,
+                    source_date_key=date_str,
+                    row=row,
+                    context=context,
+                    is_valid=(reason is None),
+                    reject_reason=reason,
+                )
+            )
             if reason:
                 rejected_records += 1
                 rejected_reasons[reason] = rejected_reasons.get(reason, 0) + 1
                 continue
             new_records.append(record)
+
+    if raw_rows:
+        raw_written = _insert_raw_price_rows(raw_rows)
+        _log_data_quality_check(
+            check_name='raw_rows_written',
+            status='pass',
+            context=context,
+            ticker=ticker,
+            observed_value=float(raw_written),
+            details={'message': 'Raw rows persisted before curated upsert'}
+        )
 
     total_candidate_rows = len(new_records) + rejected_records
 
@@ -703,7 +787,7 @@ def smart_fetch_and_store(ticker, **context):
 # ---------------------------------------------------------------------------
 # DAG definition
 #   Schedule: @daily (runs once per day)
-#   Task order: create_table → fetch_daily_stock_data
+#   Task order: create_table → fetch_daily_stock_data (parallel per ticker) → compute_features (parallel per ticker)
 #   For first-time historical data load, trigger the backfill_historical_data DAG manually.
 # ---------------------------------------------------------------------------
 with DAG(
@@ -711,7 +795,7 @@ with DAG(
     start_date=datetime(2026, 1, 1),
     schedule='@daily',
     catchup=False,
-    description='Fetch daily AAPL stock data from Alpha Vantage and store in PostgreSQL'
+    description='Fetch daily stock data for multiple tickers from Alpha Vantage and store in PostgreSQL'
 ) as dag:
 
     create_table_task = PythonOperator(
@@ -719,17 +803,20 @@ with DAG(
         python_callable=create_table
     )
 
-    daily_fetch_task = PythonOperator(
+    # Dynamically create fetch tasks for each ticker in parallel
+    daily_fetch_task = PythonOperator.partial(
         task_id='fetch_daily_stock_data',
-        python_callable=smart_fetch_and_store,
-        op_kwargs={'ticker': 'AAPL'}
-    )
+        python_callable=smart_fetch_and_store
+    ).expand(op_kwargs=[{'ticker': ticker} for ticker in TICKERS])
 
-    feature_engineering_task = PythonOperator(
+    # Dynamically create feature engineering tasks for each ticker in parallel
+    # Each ticker gets its own dataset trigger
+    feature_engineering_task = PythonOperator.partial(
         task_id='compute_features',
-        python_callable=compute_and_store_features,
-        op_kwargs={'ticker': 'AAPL'},
-        outlets=[FEATURES_READY_DATASET]
+        python_callable=compute_and_store_features
+    ).expand(
+        op_kwargs=[{'ticker': ticker} for ticker in TICKERS],
+        outlets=[[Dataset(f'dataset://stock_features/{ticker.lower()}/ready')] for ticker in TICKERS]
     )
 
     create_table_task >> daily_fetch_task >> feature_engineering_task

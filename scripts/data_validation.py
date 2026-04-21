@@ -12,6 +12,7 @@ import os
 from datetime import datetime
 import requests
 import psycopg2
+from psycopg2.extras import execute_values
 
 
 # ============================================================================
@@ -132,6 +133,142 @@ def validate_and_build_price_record(ticker, date_str, row):
         return None, 'close_outside_high_low'
 
     return (ticker, date_str, open_price, high_price, low_price, close_price, volume), None
+
+
+def build_raw_price_observation(
+    ticker,
+    source_date_key,
+    row,
+    context=None,
+    is_valid=None,
+    reject_reason=None,
+    source='alphavantage',
+):
+    """Build one raw-ingestion row tuple for stock_prices_raw."""
+    run_id = None
+    dag_id = None
+    task_id = None
+
+    if context:
+        run_id = context.get('run_id')
+        task_instance = context.get('task_instance')
+        if task_instance:
+            dag_id = task_instance.dag_id
+            task_id = task_instance.task_id
+
+    trade_date = None
+    try:
+        trade_date = datetime.strptime(source_date_key, '%Y-%m-%d').date()
+    except Exception:
+        trade_date = None
+
+    def _safe_float(key):
+        try:
+            return float(row[key])
+        except Exception:
+            return None
+
+    def _safe_int(key):
+        try:
+            return int(float(row[key]))
+        except Exception:
+            return None
+
+    open_price = _safe_float('1. open') if isinstance(row, dict) else None
+    high_price = _safe_float('2. high') if isinstance(row, dict) else None
+    low_price = _safe_float('3. low') if isinstance(row, dict) else None
+    close_price = _safe_float('4. close') if isinstance(row, dict) else None
+    volume = _safe_int('5. volume') if isinstance(row, dict) else None
+
+    return (
+        ticker,
+        source_date_key,
+        trade_date,
+        open_price,
+        high_price,
+        low_price,
+        close_price,
+        volume,
+        json.dumps(row if isinstance(row, dict) else {'value': row}),
+        is_valid,
+        reject_reason,
+        source,
+        dag_id,
+        task_id,
+        run_id,
+    )
+
+
+def insert_raw_price_rows(raw_rows):
+    """Bulk insert raw-ingestion rows into stock_prices_raw."""
+    if not raw_rows:
+        return 0
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    execute_values(
+        cursor,
+        """
+        INSERT INTO stock_prices_raw
+            (ticker, source_date_key, trade_date, open, high, low, close, volume,
+             raw_payload, is_valid, reject_reason, source, dag_id, task_id, run_id)
+        VALUES %s
+        ON CONFLICT (ticker, source_date_key, run_id) DO UPDATE SET
+            trade_date = EXCLUDED.trade_date,
+            open = EXCLUDED.open,
+            high = EXCLUDED.high,
+            low = EXCLUDED.low,
+            close = EXCLUDED.close,
+            volume = EXCLUDED.volume,
+            raw_payload = EXCLUDED.raw_payload,
+            is_valid = EXCLUDED.is_valid,
+            reject_reason = EXCLUDED.reject_reason,
+            source = EXCLUDED.source,
+            dag_id = EXCLUDED.dag_id,
+            task_id = EXCLUDED.task_id,
+            ingested_at = CURRENT_TIMESTAMP
+        """,
+        raw_rows,
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return len(raw_rows)
+
+
+def ensure_raw_price_table_exists():
+    """Create stock_prices_raw table if it does not exist yet."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS stock_prices_raw (
+            id              SERIAL PRIMARY KEY,
+            ticker          VARCHAR(10) NOT NULL,
+            source_date_key VARCHAR(20) NOT NULL,
+            trade_date      DATE,
+            open            FLOAT,
+            high            FLOAT,
+            low             FLOAT,
+            close           FLOAT,
+            volume          BIGINT,
+            raw_payload     JSONB NOT NULL,
+            is_valid        BOOLEAN,
+            reject_reason   VARCHAR(100),
+            source          VARCHAR(50) DEFAULT 'alphavantage',
+            dag_id          VARCHAR(255),
+            task_id         VARCHAR(255),
+            run_id          VARCHAR(255),
+            ingested_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(ticker, source_date_key, run_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_raw_ticker_date ON stock_prices_raw(ticker, trade_date);
+        CREATE INDEX IF NOT EXISTS idx_raw_run_id ON stock_prices_raw(run_id);
+        """
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
 
 
 # ============================================================================
