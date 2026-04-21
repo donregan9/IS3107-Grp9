@@ -810,13 +810,11 @@ with DAG(
     ).expand(op_kwargs=[{'ticker': ticker} for ticker in TICKERS])
 
     # Dynamically create feature engineering tasks for each ticker in parallel
-    # Each ticker gets its own dataset trigger
+    # All tickers share a single dataset trigger for downstream DAG dependencies
     feature_engineering_task = PythonOperator.partial(
         task_id='compute_features',
-        python_callable=compute_and_store_features
-    ).expand(
-        op_kwargs=[{'ticker': ticker} for ticker in TICKERS],
-        outlets=[[Dataset(f'dataset://stock_features/{ticker.lower()}/ready')] for ticker in TICKERS]
-    )
+        python_callable=compute_and_store_features,
+        outlets=[Dataset('dataset://stock_features/ready')]
+    ).expand(op_kwargs=[{'ticker': ticker} for ticker in TICKERS])
 
     create_table_task >> daily_fetch_task >> feature_engineering_task
