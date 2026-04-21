@@ -5,13 +5,22 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.datasets import Dataset
 from datetime import datetime, timedelta
-import json
-import requests
+import sys
+import os
+from pathlib import Path
+
 import psycopg2
 from psycopg2.extras import execute_values
 import pandas as pd
 import numpy as np
-import os
+
+# Import shared validation helpers from scripts/data_validation.py
+sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+from data_validation import (
+    fetch_alpha_vantage_daily as _fetch_av_daily_impl,
+    validate_and_build_price_record,
+    log_data_quality_check
+)
 
 # ---------------------------------------------------------------------------
 # Configuration (reads from environment variables, with safe defaults)
@@ -40,6 +49,25 @@ def get_connection():
         database=DB_NAME, port=DB_PORT
     )
 
+# Wrapper to pass module-level API key and timeout to shared module function
+def _fetch_alpha_vantage_daily(ticker, outputsize='compact'):
+    """Fetch daily OHLCV payload with module-level API key and timeout."""
+    return _fetch_av_daily_impl(ticker, ALPHA_VANTAGE_API_KEY, API_TIMEOUT_SECONDS, outputsize)
+
+# Re-export validation helpers with underscore prefix for consistency
+def _validate_and_build_price_record(ticker, date_str, row):
+    """Validate one OHLCV row and return a DB record tuple or a rejection reason."""
+    return validate_and_build_price_record(ticker, date_str, row)
+
+def _log_data_quality_check(
+    check_name, status, context=None, ticker=None, observed_value=None,
+    threshold=None, failed_count=0, details=None
+):
+    """Persist one data-quality check result for observability and audit."""
+    return log_data_quality_check(
+        check_name, status, context, ticker, observed_value, threshold, failed_count, details
+    )
+
 UPSERT_QUERY = """
     INSERT INTO stock_prices (ticker, date, open, high, low, close, volume)
     VALUES %s
@@ -60,130 +88,6 @@ def upsert_values(values):
     conn.commit()
     cursor.close()
     conn.close()
-
-
-def _log_data_quality_check(
-    check_name,
-    status,
-    context=None,
-    ticker=None,
-    observed_value=None,
-    threshold=None,
-    failed_count=0,
-    details=None,
-):
-    """Persist one data-quality check result for observability and audit."""
-    run_id = None
-    dag_id = None
-    task_id = None
-
-    if context:
-        run_id = context.get('run_id')
-        task_instance = context.get('task_instance')
-        if task_instance:
-            dag_id = task_instance.dag_id
-            task_id = task_instance.task_id
-
-    details_text = details if isinstance(details, str) else json.dumps(details or {})
-
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO data_quality_results
-                (dag_id, task_id, run_id, ticker, check_name, status,
-                 observed_value, threshold, failed_count, details)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                dag_id,
-                task_id,
-                run_id,
-                ticker,
-                check_name,
-                status,
-                observed_value,
-                threshold,
-                failed_count,
-                details_text,
-            ),
-        )
-        conn.commit()
-        cursor.close()
-        conn.close()
-    except Exception as exc:
-        print(f"Warning: failed to write data quality check '{check_name}': {exc}")
-
-
-def _fetch_alpha_vantage_daily(ticker, outputsize='compact'):
-    """Fetch daily OHLCV payload and validate API-level response integrity."""
-    url = (
-        f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY'
-        f'&symbol={ticker}&outputsize={outputsize}&apikey={ALPHA_VANTAGE_API_KEY}'
-    )
-    try:
-        response = requests.get(url, timeout=API_TIMEOUT_SECONDS)
-        response.raise_for_status()
-        data = response.json()
-    except requests.RequestException as exc:
-        raise RuntimeError(f"Alpha Vantage request failed for {ticker}: {exc}") from exc
-    except ValueError as exc:
-        raise RuntimeError(f"Alpha Vantage returned non-JSON payload for {ticker}") from exc
-
-    if not isinstance(data, dict):
-        raise RuntimeError("Alpha Vantage response is not a JSON object")
-
-    if data.get('Error Message'):
-        raise RuntimeError(f"Alpha Vantage API error for {ticker}: {data['Error Message']}")
-
-    if data.get('Note'):
-        raise RuntimeError(f"Alpha Vantage rate limit or notice for {ticker}: {data['Note']}")
-
-    time_series = data.get('Time Series (Daily)')
-    if not isinstance(time_series, dict) or not time_series:
-        raise RuntimeError(f"Alpha Vantage response missing Time Series (Daily) for {ticker}")
-
-    return time_series
-
-
-def _validate_and_build_price_record(ticker, date_str, row):
-    """Validate one OHLCV row and return a DB record tuple or a rejection reason."""
-    required_fields = ('1. open', '2. high', '3. low', '4. close', '5. volume')
-
-    try:
-        datetime.strptime(date_str, '%Y-%m-%d')
-    except Exception:
-        return None, 'invalid_date'
-
-    if not isinstance(row, dict):
-        return None, 'invalid_row_type'
-
-    missing_fields = [field for field in required_fields if field not in row]
-    if missing_fields:
-        return None, 'missing_fields'
-
-    try:
-        open_price = float(row['1. open'])
-        high_price = float(row['2. high'])
-        low_price = float(row['3. low'])
-        close_price = float(row['4. close'])
-        volume = int(float(row['5. volume']))
-    except (TypeError, ValueError):
-        return None, 'type_conversion_error'
-
-    if min(open_price, high_price, low_price, close_price) <= 0:
-        return None, 'non_positive_price'
-    if volume < 0:
-        return None, 'negative_volume'
-    if high_price < low_price:
-        return None, 'high_below_low'
-    if not (low_price <= open_price <= high_price):
-        return None, 'open_outside_high_low'
-    if not (low_price <= close_price <= high_price):
-        return None, 'close_outside_high_low'
-
-    return (ticker, date_str, open_price, high_price, low_price, close_price, volume), None
 
 # ---------------------------------------------------------------------------
 # Task 1 – create_table
@@ -614,7 +518,7 @@ def smart_fetch_and_store(ticker, **context):
     
     print(f"Last data point in DB: {last_date}. Fetching updates...")
 
-    time_series = _fetch_alpha_vantage_daily(ticker, outputsize='compact')
+    time_series = _fetch_alpha_vantage_daily(ticker, ALPHA_VANTAGE_API_KEY, API_TIMEOUT_SECONDS, outputsize='compact')
     _log_data_quality_check(
         check_name='api_payload_valid',
         status='pass',

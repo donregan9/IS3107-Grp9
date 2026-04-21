@@ -13,13 +13,23 @@
 # ---------------------------------------------------------------------------
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from datetime import datetime
-import requests
+from datetime import datetime, timedelta
+import sys
+import os
+from pathlib import Path
+
 import psycopg2
 from psycopg2.extras import execute_values
 import pandas as pd
 import numpy as np
-import os
+
+# Import shared validation helpers from scripts/data_validation.py
+sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+from data_validation import (
+    fetch_alpha_vantage_daily as _fetch_av_daily_impl,
+    validate_and_build_price_record,
+    log_data_quality_check
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -31,6 +41,8 @@ DB_NAME     = os.getenv('DB_NAME', 'airflow')
 DB_PORT     = os.getenv('DB_PORT', '5432')
 
 ALPHA_VANTAGE_API_KEY = os.getenv('ALPHAVANTAGE_API_KEY', 'XHD8MQIGSGDCPGSY')
+API_TIMEOUT_SECONDS = 30
+MAX_REJECT_RATIO = 0.20
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -39,6 +51,25 @@ def get_connection():
     return psycopg2.connect(
         host=DB_HOST, user=DB_USER, password=DB_PASSWORD,
         database=DB_NAME, port=DB_PORT
+    )
+
+# Wrapper to pass module-level API key and timeout to shared module function
+def _fetch_alpha_vantage_daily(ticker, outputsize='compact'):
+    """Fetch daily OHLCV payload with module-level API key and timeout."""
+    return _fetch_av_daily_impl(ticker, ALPHA_VANTAGE_API_KEY, API_TIMEOUT_SECONDS, outputsize)
+
+# Re-export validation helpers with underscore prefix for consistency
+def _validate_and_build_price_record(ticker, date_str, row):
+    """Validate one OHLCV row and return a DB record tuple or a rejection reason."""
+    return validate_and_build_price_record(ticker, date_str, row)
+
+def _log_data_quality_check(
+    check_name, status, context=None, ticker=None, observed_value=None,
+    threshold=None, failed_count=0, details=None
+):
+    """Persist one data-quality check result for observability and audit."""
+    return log_data_quality_check(
+        check_name, status, context, ticker, observed_value, threshold, failed_count, details
     )
 
 UPSERT_QUERY = """
@@ -71,32 +102,103 @@ def backfill_stock_data(ticker, **context):
         print(f"Backfilling {ticker} (full history) from Alpha Vantage...")
         # outputsize=compact returns the last 100 trading days (free tier)
         # outputsize=full requires a premium API key (~20 years of data)
-        url = (
-            f'https://www.alphavantage.co/query'
-            f'?function=TIME_SERIES_DAILY'
-            f'&symbol={ticker}'
-            f'&outputsize=compact'
-            f'&apikey={ALPHA_VANTAGE_API_KEY}'
+        time_series = _fetch_alpha_vantage_daily(ticker, outputsize='compact')
+        _log_data_quality_check(
+            check_name='api_payload_valid',
+            status='pass',
+            context=context,
+            ticker=ticker,
+            observed_value=float(len(time_series)),
+            details={'message': 'Time Series payload retrieved successfully'}
         )
-        data = requests.get(url).json()
-        time_series = data.get("Time Series (Daily)", {})
 
-        if not time_series:
-            print(f"No data returned for {ticker}. API response: {data}")
-            return {"status": "no_data", "records": 0}
+        new_records = []
+        rejected_records = 0
+        rejected_reasons = {}
 
-        values = [
-            (ticker, date_str,
-             float(row['1. open']), float(row['2. high']),
-             float(row['3. low']),  float(row['4. close']),
-             int(row['5. volume']))
-            for date_str, row in time_series.items()
-        ]
+        for date_str, row in time_series.items():
+            record, reason = _validate_and_build_price_record(ticker, date_str, row)
+            if reason:
+                rejected_records += 1
+                rejected_reasons[reason] = rejected_reasons.get(reason, 0) + 1
+                continue
+            new_records.append(record)
 
-        upsert_values(values)
-        print(f"Backfill complete: {len(values)} records upserted for {ticker}.")
-        return {"status": "success", "records": len(values)}
+        total_candidate_rows = len(new_records) + rejected_records
+
+        if rejected_records:
+            print(
+                f"Validation rejected {rejected_records}/{total_candidate_rows} rows for {ticker}. "
+                f"Reasons: {rejected_reasons}"
+            )
+
+        if rejected_records and not new_records:
+            _log_data_quality_check(
+                check_name='all_candidate_rows_rejected',
+                status='fail',
+                context=context,
+                ticker=ticker,
+                observed_value=float(total_candidate_rows),
+                failed_count=rejected_records,
+                details={'reasons': rejected_reasons}
+            )
+            raise ValueError(
+                f"All candidate rows failed validation for {ticker}. "
+                f"Reasons: {rejected_reasons}"
+            )
+
+        if total_candidate_rows > 0:
+            reject_ratio = rejected_records / total_candidate_rows
+            _log_data_quality_check(
+                check_name='row_validation',
+                status='pass' if rejected_records == 0 else 'fail',
+                context=context,
+                ticker=ticker,
+                observed_value=float(total_candidate_rows),
+                threshold=MAX_REJECT_RATIO,
+                failed_count=rejected_records,
+                details={
+                    'accepted_rows': len(new_records),
+                    'rejected_rows': rejected_records,
+                    'reasons': rejected_reasons
+                }
+            )
+            if reject_ratio > MAX_REJECT_RATIO:
+                _log_data_quality_check(
+                    check_name='reject_ratio_threshold',
+                    status='fail',
+                    context=context,
+                    ticker=ticker,
+                    observed_value=reject_ratio,
+                    threshold=MAX_REJECT_RATIO,
+                    failed_count=rejected_records,
+                    details={'reasons': rejected_reasons}
+                )
+                raise ValueError(
+                    f"Rejected {rejected_records}/{total_candidate_rows} rows for {ticker} "
+                    f"({reject_ratio:.1%}), above threshold {MAX_REJECT_RATIO:.0%}."
+                )
+
+        upsert_values(new_records)
+        _log_data_quality_check(
+            check_name='rows_upserted',
+            status='pass',
+            context=context,
+            ticker=ticker,
+            observed_value=float(len(new_records)),
+            details={'rejected_rows': rejected_records}
+        )
+        print(f"Backfill complete: {len(new_records)} records upserted for {ticker} (rejected: {rejected_records}).")
+        return {"status": "success", "records": len(new_records)}
     except Exception as e:
+        _log_data_quality_check(
+            check_name='backfill_ingestion_exception',
+            status='fail',
+            context=context,
+            ticker=ticker,
+            failed_count=1,
+            details={'error': str(e)}
+        )
         print(f"Backfill error: {e}")
         return {"status": "failed", "error": str(e)}
 # ---------------------------------------------------------------------------
