@@ -271,6 +271,39 @@ def ensure_raw_price_table_exists():
     conn.close()
 
 
+def log_reconciliation_summary(
+    check_name,
+    context=None,
+    ticker=None,
+    raw_count=0,
+    valid_count=0,
+    rejected_count=0,
+    upserted_count=0,
+    details=None,
+):
+    """Persist a reconciliation summary for raw-to-curated row counts."""
+    summary = {
+        'raw_count': int(raw_count),
+        'valid_count': int(valid_count),
+        'rejected_count': int(rejected_count),
+        'upserted_count': int(upserted_count),
+    }
+    if details:
+        summary.update(details if isinstance(details, dict) else {'details': details})
+
+    status = 'pass' if int(rejected_count) == 0 else 'fail'
+    return log_data_quality_check(
+        check_name=check_name,
+        status=status,
+        context=context,
+        ticker=ticker,
+        observed_value=float(raw_count),
+        threshold=float(valid_count),
+        failed_count=int(rejected_count),
+        details=summary,
+    )
+
+
 # ============================================================================
 # Quality Audit Logging
 # ============================================================================

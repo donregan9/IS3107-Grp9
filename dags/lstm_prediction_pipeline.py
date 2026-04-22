@@ -17,6 +17,7 @@ import logging
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.datasets import Dataset
+from airflow.exceptions import AirflowSkipException
 from datetime import datetime
 
 # Make scripts/ importable
@@ -27,8 +28,10 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Multi-ticker support
 # ---------------------------------------------------------------------------
-TICKERS = ['AAPL', 'NVDA']  # Add more tickers here to scale
-FEATURES_READY_DATASET = Dataset('dataset://stock_features/ready')  # Shared trigger from market_data_pipeline
+from ticker_config import get_tickers, get_features_ready_dataset_uri
+
+TICKERS = get_tickers()
+FEATURES_READY_DATASET = Dataset(get_features_ready_dataset_uri())  # Shared trigger from market_data_pipeline
 
 # ---------------------------------------------------------------------------
 # Wrapper callables (lazy-import tensorflow inside the task so the Airflow
@@ -37,7 +40,14 @@ FEATURES_READY_DATASET = Dataset('dataset://stock_features/ready')  # Shared tri
 
 def task_train_model(ticker: str, **context):
     from lstm_model import train_model
-    result = train_model(ticker)
+    try:
+        result = train_model(ticker)
+    except ValueError as exc:
+        # Skip tickers that do not yet have enough feature history for training.
+        if 'Not enough data to train' in str(exc):
+            log.warning("Skipping training for %s: %s", ticker, exc)
+            raise AirflowSkipException(str(exc))
+        raise
     log.info("Training complete: %s", result)
     # Push metrics to XCom so they're visible in the Airflow UI
     context['ti'].xcom_push(key='training_result', value=result)

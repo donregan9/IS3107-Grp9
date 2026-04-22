@@ -31,8 +31,10 @@ from data_validation import (
     log_data_quality_check,
     build_raw_price_observation,
     insert_raw_price_rows,
-    ensure_raw_price_table_exists
+    ensure_raw_price_table_exists,
+    log_reconciliation_summary
 )
+from ticker_config import get_tickers
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -50,7 +52,7 @@ MAX_REJECT_RATIO = 0.20
 # ---------------------------------------------------------------------------
 # Multi-ticker support
 # ---------------------------------------------------------------------------
-TICKERS = ['AAPL', 'NVDA']  # Add more tickers here to scale
+TICKERS = get_tickers()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -98,6 +100,23 @@ def _insert_raw_price_rows(raw_rows):
 def _ensure_raw_price_table_exists():
     """Create stock_prices_raw table if it does not exist yet."""
     return ensure_raw_price_table_exists()
+
+
+def _log_reconciliation_summary(
+    check_name, context=None, ticker=None, raw_count=0, valid_count=0,
+    rejected_count=0, upserted_count=0, details=None
+):
+    """Persist a reconciliation summary for raw-to-curated row counts."""
+    return log_reconciliation_summary(
+        check_name,
+        context=context,
+        ticker=ticker,
+        raw_count=raw_count,
+        valid_count=valid_count,
+        rejected_count=rejected_count,
+        upserted_count=upserted_count,
+        details=details,
+    )
 
 UPSERT_QUERY = """
     INSERT INTO stock_prices (ticker, date, open, high, low, close, volume)
@@ -237,6 +256,16 @@ def backfill_stock_data(ticker, **context):
             ticker=ticker,
             observed_value=float(len(new_records)),
             details={'rejected_rows': rejected_records}
+        )
+        _log_reconciliation_summary(
+            check_name='backfill_reconciliation',
+            context=context,
+            ticker=ticker,
+            raw_count=len(raw_rows),
+            valid_count=len(new_records),
+            rejected_count=rejected_records,
+            upserted_count=len(new_records),
+            details={'mode': 'backfill'}
         )
         print(f"Backfill complete: {len(new_records)} records upserted for {ticker} (rejected: {rejected_records}).")
         return {"status": "success", "records": len(new_records)}
