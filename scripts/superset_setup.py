@@ -114,8 +114,8 @@ CHART_CONFIG = {
             "metrics": [
                 {"label": "Predicted", "expressionType": "SIMPLE", "column": {"column_name": "predicted_close"}, "aggregate": "MAX"},
                 {"label": "Actual",    "expressionType": "SIMPLE", "column": {"column_name": "actual_close"},    "aggregate": "MAX"},
-                {"label": "Error", "expressionType": "SIMPLE", "column": {"column_name": "error"}, "aggregate": "MAX"},
-                {"label": "Absolute Error",    "expressionType": "SIMPLE", "column": {"column_name": "abs_error"},    "aggregate": "MAX"},
+                # {"label": "Error", "expressionType": "SIMPLE", "column": {"column_name": "error"}, "aggregate": "MAX"},
+                # {"label": "Absolute Error",    "expressionType": "SIMPLE", "column": {"column_name": "abs_error"},    "aggregate": "MAX"},
             ],
             "groupby": [],
             "time_grain_sqla": "P1D",
@@ -270,6 +270,26 @@ CHART_CONFIG = {
             "groupby": [],
             "row_limit": 1000,
         },
+        },
+    },
+    28: {
+        "name":     "Price Difference",
+        "viz_type": "echarts_timeseries_line",
+        "params": {
+            "x_axis": "ds",             
+            "granularity_sqla": "ds",    
+            "time_range": "No filter",   
+            "metrics": [
+                # {"label": "Predicted", "expressionType": "SIMPLE", "column": {"column_name": "predicted_close"}, "aggregate": "MAX"},
+                # {"label": "Actual",    "expressionType": "SIMPLE", "column": {"column_name": "actual_close"},    "aggregate": "MAX"},
+                {"label": "Error", "expressionType": "SIMPLE", "column": {"column_name": "error"}, "aggregate": "MAX"},
+                {"label": "Absolute Error",    "expressionType": "SIMPLE", "column": {"column_name": "abs_error"},    "aggregate": "MAX"},
+            ],
+            "groupby": [],
+            "time_grain_sqla": "P1D",
+            "seriesType": "line",
+            "show_legend": True,
+            "rich_tooltip": True,
         },
     },
 }
@@ -456,6 +476,61 @@ def create_dashboard(session, chart_ids, chart_names):
         print(f"     • {name}  (ID {cid})")
     print(f"4. Click 'Save' when done")
     print(f"{'='*60}")
+    return dashboard_id
+
+# ---------------------------------------------------------------------------
+# Dashboard Filter
+# ---------------------------------------------------------------------------
+
+def add_native_filter_to_dashboard(session, dashboard_id, filter_dataset_id, exclude_chart_ids):
+    print("\n--- Configuring Dashboard Native Filter ---")
+    
+    # 1. Fetch current dashboard config
+    resp = session.get(f"{SUPERSET_URL}/api/v1/dashboard/{dashboard_id}")
+    if not resp.ok:
+        print(f" ✗ Failed to fetch dashboard {dashboard_id}: {resp.text}")
+        return
+        
+    dash_data = resp.json()["result"]
+    
+    # 2. Parse the hidden json_metadata (where filters live)
+    # FIX: Handle the case where the API explicitly returns None
+    raw_metadata = dash_data.get("json_metadata") or "{}"
+    json_meta = json.loads(raw_metadata)
+    
+    # 3. Define the filter architecture
+    filter_config = {
+        "id": "NATIVE_FILTER-ticker_select",
+        "name": "Ticker",
+        "filterType": "filter_select",
+        "targets": [{"datasetId": filter_dataset_id, "column": {"name": "ticker"}}],
+        "controlValues": {
+            "enableEmptyFilter": False,
+            "multiSelect": False,
+            "inverseSelection": False
+        },
+        "defaultDataMask": {
+            "filterState": {"value": ["AAPL"]}
+        },
+        "scope": {
+            "rootPath": ["ROOT_ID"],
+            "excluded": exclude_chart_ids # Skips the DAG charts
+        }
+    }
+    
+    # 4. Inject into metadata
+    json_meta["native_filter_configuration"] = [filter_config]
+    
+    # 5. Push the updated metadata back to Superset
+    put_payload = {
+        "json_metadata": json.dumps(json_meta)
+    }
+    
+    put_resp = session.put(f"{SUPERSET_URL}/api/v1/dashboard/{dashboard_id}", json=put_payload)
+    if put_resp.ok:
+        print(" ✓ Successfully injected 'Ticker' Native Filter (Default: AAPL)")
+    else:
+        print(f" ✗ Failed to update filter metadata: {put_resp.text}")
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +548,7 @@ def main():
     queries     = parse_sql_file(SQL_FILE)
     chart_ids   = []
     chart_names = []
+    exclude_from_filter = [] # Exclude Dag Related Data
 
     for num, sql in sorted(queries.items()):
         config = CHART_CONFIG.get(num)
@@ -492,10 +568,18 @@ def main():
             )
             chart_ids.append(chart_id)
             chart_names.append(config["name"])
+            if num in [11, 12]:
+                exclude_from_filter.append(chart_id)
+
+    filter_sql = "SELECT unnest(ARRAY['AAPL', 'MSFT', 'NVDA']) AS ticker;"
+    filter_dataset_id = create_dataset(session, db_id, "ticker_filters", filter_sql)
 
     print("\n=== Creating Dashboard ===")
-    create_dashboard(session, chart_ids, chart_names)
+    dashboard_id = create_dashboard(session, chart_ids, chart_names)
     print("\n✓ All done!")
+
+    if dashboard_id and filter_dataset_id:
+        add_native_filter_to_dashboard(session, dashboard_id, filter_dataset_id, exclude_from_filter)
 
 
 if __name__ == "__main__":
