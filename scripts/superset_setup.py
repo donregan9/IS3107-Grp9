@@ -295,7 +295,7 @@ CHART_CONFIG = {
 }
 
 # Collect all chart/dataset names for teardown matching
-ALL_NAMES = {cfg["name"] for cfg in CHART_CONFIG.values()}
+ALL_NAMES = {cfg["name"] for cfg in CHART_CONFIG.values()}.union({"ticker_filters"})
 
 # ---------------------------------------------------------------------------
 # Auth
