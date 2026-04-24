@@ -31,7 +31,7 @@ USERNAME        = "admin"
 PASSWORD        = "admin"
 DB_NAME         = "airflow"
 SQL_FILE        = "./superset_dashboard_queries.sql"
-DASHBOARD_TITLE = "AAPL Stock Prediction Dashboard"
+DASHBOARD_TITLE = "StockSight Prediction Dashboard"
 
 # ---------------------------------------------------------------------------
 # Chart config: name, viz_type, and full params (x-axis + metrics)
@@ -114,14 +114,15 @@ CHART_CONFIG = {
             "metrics": [
                 {"label": "Predicted", "expressionType": "SIMPLE", "column": {"column_name": "predicted_close"}, "aggregate": "MAX"},
                 {"label": "Actual",    "expressionType": "SIMPLE", "column": {"column_name": "actual_close"},    "aggregate": "MAX"},
-                {"label": "Error", "expressionType": "SIMPLE", "column": {"column_name": "error"}, "aggregate": "MAX"},
-                {"label": "Absolute Error",    "expressionType": "SIMPLE", "column": {"column_name": "abs_error"},    "aggregate": "MAX"},
+                # {"label": "Error", "expressionType": "SIMPLE", "column": {"column_name": "error"}, "aggregate": "MAX"},
+                # {"label": "Absolute Error",    "expressionType": "SIMPLE", "column": {"column_name": "abs_error"},    "aggregate": "MAX"},
             ],
             "groupby": [],
             "time_grain_sqla": "P1D",
             "seriesType": "line",
             "show_legend": True,
             "rich_tooltip": True,
+            "y_axis_title": "Price ($)",
         },
     },
     7: {
@@ -136,15 +137,29 @@ CHART_CONFIG = {
         },
     },
     8: {
-        "name":     "Rolling 7D Directional Accuracy",
+        "name": "Rolling 7-Day Directional Accuracy",
         "viz_type": "echarts_timeseries_line",
         "params": {
             "x_axis": "ds",
             "metrics": [
-                {"label": "rolling_7d_directional_accuracy", "expressionType": "SIMPLE", "column": {"column_name": "rolling_7d_directional_accuracy"}, "aggregate": "MAX"},
+                {
+                    "label": "Hit Rate", 
+                    "expressionType": "SIMPLE", 
+                    "column": {"column_name": "rolling_7d_directional_accuracy"}, 
+                    "aggregate": "MAX" 
+                },
             ],
-            "groupby": [],
-            "time_grain_sqla": "P1D",
+            # This forces Superset to display 0.654 as "65.4%"
+            "y_axis_format": ".1%", 
+            
+            # Locks the Y-Axis between 0% and 100% so the chart doesn't bounce around
+            "y_axis_bounds": [0, 1], 
+            
+            # Optional UI Polish
+            "show_legend": False,
+            "seriesType": "line",
+            "rich_tooltip": True,
+            "color_picker": {"r": 255, "g": 165, "b": 0, "a": 1}, # Orange line for distinction
         },
     },
     9: {
@@ -199,34 +214,37 @@ CHART_CONFIG = {
         },
     },
     23: {
-        "name":     "Latest Price Date",
+        "name":     "Ticker",
         "viz_type": "table",
         "params": {
-            "all_columns": ["ticker", "latest_price_date"],
+            "all_columns": ["Stock Ticker", "Last Updated"],
             "groupby": [],
             "row_limit": 1000,
+            "include_search": False,
         },
     },
     24: {
         "name":     "Latest Feature Date",
         "viz_type": "table",
         "params": {
-            "all_columns": ["ticker", "latest_feature_date"],
+            "all_columns": ["Stock Ticker", "Last Updated"],
             "groupby": [],
             "row_limit": 1000,
+            "include_search": False,
         },
     },
     25: {
-        "name":     "Latest Prediction Date",
+        "name":     "Model Updates",
         "viz_type": "table",
         "params": {
-            "all_columns": ["ticker", "model_version", "latest_prediction_date"],
+            "all_columns": ["Stock Ticker", "Model Version", "Last Updated"],
             "groupby": [],
             "row_limit": 1000,
+            "include_search": False,
         },
     },
     26: {
-        "name":     "Daily Prediction Residuals",
+        "name":     "Daily Prediction Residual Error",
         "viz_type": "echarts_timeseries_bar",
         "params": {
             "x_axis": "ds",
@@ -272,10 +290,106 @@ CHART_CONFIG = {
         },
         },
     },
+
+    29: {
+        "name": "Close",
+        "viz_type": "big_number_total",
+        "params": {
+            "metric": {
+                "label": "Close",
+                "expressionType": "SIMPLE",
+                "column": {"column_name": "close"},
+                "aggregate": "MAX"
+            },
+            "y_axis_format": "$,.2f",
+            "subheader_fontsize": 0.8,
+        },
+    },
+    30: {
+        "name": "Predicted Next Close",
+        "viz_type": "big_number_total", 
+        "params": {
+            "metric": {
+                "label": "Predicted",
+                "expressionType": "SIMPLE",
+                "column": {"column_name": "predicted_close"},
+                "aggregate": "MAX"
+            },
+            "y_axis_format": "$,.2f",
+            "conditional_formatting": [
+                {
+                    "colorScheme": "#28A745", # Superset Success Green
+                    "column": "Predicted",    
+                    "operator": ">",
+                    "targetValue": -999999    
+                }
+            ]
+        },
+    },
+    31: {
+        "name":     "Daily Prediction Error",
+        "viz_type": "echarts_timeseries_line",
+        "params": {
+            "x_axis": "ds",             
+            "granularity_sqla": "ds",    
+            "time_range": "No filter",   
+            "metrics": [
+                # {"label": "Predicted", "expressionType": "SIMPLE", "column": {"column_name": "predicted_close"}, "aggregate": "MAX"},
+                # {"label": "Actual",    "expressionType": "SIMPLE", "column": {"column_name": "actual_close"},    "aggregate": "MAX"},
+                {"label": "Error", "expressionType": "SIMPLE", "column": {"column_name": "error"}, "aggregate": "MAX"},
+                {"label": "Absolute Error",    "expressionType": "SIMPLE", "column": {"column_name": "abs_error"},    "aggregate": "MAX"},
+            ],
+            "groupby": [],
+            "time_grain_sqla": "P1D",
+            "seriesType": "line",
+            "show_legend": True,
+            "rich_tooltip": True,
+            "y_axis_title": "Price Difference ($)",
+        },
+    },
+
+    32: {
+        "name": "7-Day Price Volatility",
+        "viz_type": "echarts_timeseries_line", 
+        "params": {
+            "x_axis": "ds",
+            "metrics": [
+                {
+                    "label": "Volatility",
+                    "expressionType": "SIMPLE",
+                    "column": {"column_name": "volatility"},
+                    "aggregate": "MAX" # MAX is safe here since there is only one row per date
+                }
+            ],
+            "groupby": ["ticker"], 
+            
+            # UI Polish
+            "y_axis_format": ".2f",
+            "show_legend": False,
+            "rich_tooltip": True,
+            "y_axis_title": "StdDev ($)",
+            # Use a distinct color (like purple) so it doesn't visually blend with your price or error charts
+            "color_picker": {"r": 128, "g": 0, "b": 128, "a": 1}, 
+        },
+    },
+
+    33: {
+        "name": "Model Performance Metrics",
+        "viz_type": "table",
+        "params": {
+            # Omit 'ticker' here to keep it hidden from the UI
+            "all_columns": ["Model Version", "MAE ($)", "RMSE ($)", "Creation Date"],
+            "groupby": [],
+            "row_limit": 100,
+            "include_search": False,
+            "order_by_cols": ["[\"Creation Date\", false]"],
+        },
+    },
+
 }
 
 # Collect all chart/dataset names for teardown matching
-ALL_NAMES = {cfg["name"] for cfg in CHART_CONFIG.values()}
+ALL_NAMES = {cfg["name"] for cfg in CHART_CONFIG.values()}.union({"ticker_filters"})
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -456,6 +570,61 @@ def create_dashboard(session, chart_ids, chart_names):
         print(f"     • {name}  (ID {cid})")
     print(f"4. Click 'Save' when done")
     print(f"{'='*60}")
+    return dashboard_id
+
+# ---------------------------------------------------------------------------
+# Dashboard Filter
+# ---------------------------------------------------------------------------
+
+def add_native_filter_to_dashboard(session, dashboard_id, filter_dataset_id, exclude_chart_ids):
+    print("\n--- Configuring Dashboard Native Filter ---")
+    
+    # 1. Fetch current dashboard config
+    resp = session.get(f"{SUPERSET_URL}/api/v1/dashboard/{dashboard_id}")
+    if not resp.ok:
+        print(f" ✗ Failed to fetch dashboard {dashboard_id}: {resp.text}")
+        return
+        
+    dash_data = resp.json()["result"]
+    
+    # 2. Parse the hidden json_metadata (where filters live)
+    # FIX: Handle the case where the API explicitly returns None
+    raw_metadata = dash_data.get("json_metadata") or "{}"
+    json_meta = json.loads(raw_metadata)
+    
+    # 3. Define the filter architecture
+    filter_config = {
+        "id": "NATIVE_FILTER-ticker_select",
+        "name": "Ticker",
+        "filterType": "filter_select",
+        "targets": [{"datasetId": filter_dataset_id, "column": {"name": "ticker"}}],
+        "controlValues": {
+            "enableEmptyFilter": False,
+            "multiSelect": False,
+            "inverseSelection": False
+        },
+        "defaultDataMask": {
+            "filterState": {"value": ["AAPL"]}
+        },
+        "scope": {
+            "rootPath": ["ROOT_ID"],
+            "excluded": exclude_chart_ids # Skips the DAG charts
+        }
+    }
+    
+    # 4. Inject into metadata
+    json_meta["native_filter_configuration"] = [filter_config]
+    
+    # 5. Push the updated metadata back to Superset
+    put_payload = {
+        "json_metadata": json.dumps(json_meta)
+    }
+    
+    put_resp = session.put(f"{SUPERSET_URL}/api/v1/dashboard/{dashboard_id}", json=put_payload)
+    if put_resp.ok:
+        print(" ✓ Successfully injected 'Ticker' Native Filter (Default: AAPL)")
+    else:
+        print(f" ✗ Failed to update filter metadata: {put_resp.text}")
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +642,7 @@ def main():
     queries     = parse_sql_file(SQL_FILE)
     chart_ids   = []
     chart_names = []
+    exclude_from_filter = [] # Exclude Dag Related Data
 
     for num, sql in sorted(queries.items()):
         config = CHART_CONFIG.get(num)
@@ -492,10 +662,18 @@ def main():
             )
             chart_ids.append(chart_id)
             chart_names.append(config["name"])
+            if num in [11, 12]:
+                exclude_from_filter.append(chart_id)
+
+    filter_sql = "SELECT unnest(ARRAY['AAPL', 'MSFT', 'NVDA']) AS ticker;"
+    filter_dataset_id = create_dataset(session, db_id, "ticker_filters", filter_sql)
 
     print("\n=== Creating Dashboard ===")
-    create_dashboard(session, chart_ids, chart_names)
+    dashboard_id = create_dashboard(session, chart_ids, chart_names)
     print("\n✓ All done!")
+
+    if dashboard_id and filter_dataset_id:
+        add_native_filter_to_dashboard(session, dashboard_id, filter_dataset_id, exclude_from_filter)
 
 
 if __name__ == "__main__":
