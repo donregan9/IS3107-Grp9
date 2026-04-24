@@ -10,7 +10,7 @@ USERNAME     = "admin"
 PASSWORD     = "admin"
 
 # The path to the ZIP file you exported from the Superset UI
-ZIP_PATH = "../superset/exports/dashboard5Apr.zip"
+ZIP_PATH = "../superset/exports/stockSight.zip"
 
 # Superset needs the database password to reconnect your 'airflow' database 
 # during the import process. Replace 'your_db_password' if it is different.
