@@ -383,27 +383,30 @@ WHERE bb_width IS NOT NULL
   AND volatility_14 IS NOT NULL
 ORDER BY ds;
 
--- 23) Latest price date (Live Status card)
+-- 23) Latest Price Date (Live Status card)
 SELECT
-  ticker,
-  MAX(date) AS latest_price_date
+  ticker,                     -- Invisible hook for the Native Filter
+  ticker AS "Stock Ticker",   -- Pretty name for the frontend table
+  MAX(date) AS "Last Updated"
 FROM stock_prices
 GROUP BY ticker
 ORDER BY ticker;
 
--- 24) Latest feature date (Live Status card)
+-- 24) Latest Feature Date (Live Status card)
 SELECT
   ticker,
-  MAX(date) AS latest_feature_date
+  ticker AS "Stock Ticker",
+  MAX(date) AS "Last Updated"
 FROM stock_features
 GROUP BY ticker
 ORDER BY ticker;
 
--- 25) Latest prediction date (Live Status card)
+-- 25) Latest Prediction Date (Live Status card)
 SELECT
   ticker,
-  model_version,
-  MAX(predicted_date) AS latest_prediction_date
+  ticker AS "Stock Ticker",
+  model_version AS "Model Version",
+  MAX(predicted_date) AS "Last Updated"
 FROM model_predictions
 GROUP BY ticker, model_version
 ORDER BY ticker, model_version;
@@ -421,11 +424,39 @@ ORDER BY ds ASC;
 -- 27) Prediction Error Distribution (Histogram)
 SELECT 
     ticker,
-    (predicted_close - actual_close) AS prediction_error
+    ROUND((predicted_close - actual_close)::numeric, 0) AS prediction_error
 FROM model_predictions
 WHERE actual_close IS NOT NULL;
 
--- 28) Price Difference (Line chart)
+
+
+-- 29) Card: Latest Close Price
+WITH latest AS (
+  SELECT ticker, MAX(date) AS max_date 
+  FROM stock_prices 
+  GROUP BY ticker
+)
+SELECT 
+  s.ticker, 
+  s.date AS ds, 
+  s.close
+FROM stock_prices s
+JOIN latest l ON s.ticker = l.ticker AND s.date = l.max_date;
+
+-- 30) Card: Latest Predicted Price
+WITH latest AS (
+  SELECT ticker, MAX(predicted_date) AS max_date 
+  FROM model_predictions 
+  GROUP BY ticker
+)
+SELECT 
+  m.ticker, 
+  m.predicted_date AS ds, 
+  m.predicted_close
+FROM model_predictions m
+JOIN latest l ON m.ticker = l.ticker AND m.predicted_date = l.max_date;
+
+-- 31) Model prediction vs actual (Line chart)
 SELECT
   predicted_date AS ds,
   ticker,
@@ -435,3 +466,32 @@ SELECT
   ABS(predicted_close - actual_close) AS abs_error
 FROM model_predictions
 ORDER BY ds;
+
+-- 32) 7-Day Rolling Volatility (Aligned to Predictions)
+WITH VolatilityCalc AS (
+  SELECT 
+    ticker,
+    date AS ds,
+    -- Calculate volatility over the entire history so the math is correct
+    STDDEV(close) OVER (
+      PARTITION BY ticker 
+      ORDER BY date 
+      ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+    ) AS volatility
+  FROM stock_prices
+  WHERE close IS NOT NULL
+),
+PredictionStarts AS (
+  -- Find the exact date the model started predicting for each ticker
+  SELECT ticker, MIN(predicted_date) as start_date
+  FROM model_predictions
+  GROUP BY ticker
+)
+SELECT 
+  v.ticker,
+  v.ds,
+  v.volatility
+FROM VolatilityCalc v
+JOIN PredictionStarts p ON v.ticker = p.ticker
+-- Only display the volatility from the prediction start date onward
+WHERE v.ds >= p.start_date;

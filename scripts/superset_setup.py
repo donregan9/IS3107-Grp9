@@ -31,7 +31,7 @@ USERNAME        = "admin"
 PASSWORD        = "admin"
 DB_NAME         = "airflow"
 SQL_FILE        = "./superset_dashboard_queries.sql"
-DASHBOARD_TITLE = "AAPL Stock Prediction Dashboard"
+DASHBOARD_TITLE = "StockSight Prediction Dashboard"
 
 # ---------------------------------------------------------------------------
 # Chart config: name, viz_type, and full params (x-axis + metrics)
@@ -122,6 +122,7 @@ CHART_CONFIG = {
             "seriesType": "line",
             "show_legend": True,
             "rich_tooltip": True,
+            "y_axis_title": "Price ($)",
         },
     },
     7: {
@@ -136,15 +137,29 @@ CHART_CONFIG = {
         },
     },
     8: {
-        "name":     "Rolling 7D Directional Accuracy",
+        "name": "Rolling 7-Day Directional Accuracy",
         "viz_type": "echarts_timeseries_line",
         "params": {
             "x_axis": "ds",
             "metrics": [
-                {"label": "rolling_7d_directional_accuracy", "expressionType": "SIMPLE", "column": {"column_name": "rolling_7d_directional_accuracy"}, "aggregate": "MAX"},
+                {
+                    "label": "Hit Rate", 
+                    "expressionType": "SIMPLE", 
+                    "column": {"column_name": "rolling_7d_directional_accuracy"}, 
+                    "aggregate": "MAX" 
+                },
             ],
-            "groupby": [],
-            "time_grain_sqla": "P1D",
+            # This forces Superset to display 0.654 as "65.4%"
+            "y_axis_format": ".1%", 
+            
+            # Locks the Y-Axis between 0% and 100% so the chart doesn't bounce around
+            "y_axis_bounds": [0, 1], 
+            
+            # Optional UI Polish
+            "show_legend": False,
+            "seriesType": "line",
+            "rich_tooltip": True,
+            "color_picker": {"r": 255, "g": 165, "b": 0, "a": 1}, # Orange line for distinction
         },
     },
     9: {
@@ -199,34 +214,37 @@ CHART_CONFIG = {
         },
     },
     23: {
-        "name":     "Latest Price Date",
+        "name":     "Ticker",
         "viz_type": "table",
         "params": {
-            "all_columns": ["ticker", "latest_price_date"],
+            "all_columns": ["Stock Ticker", "Last Updated"],
             "groupby": [],
             "row_limit": 1000,
+            "include_search": False,
         },
     },
     24: {
         "name":     "Latest Feature Date",
         "viz_type": "table",
         "params": {
-            "all_columns": ["ticker", "latest_feature_date"],
+            "all_columns": ["Stock Ticker", "Last Updated"],
             "groupby": [],
             "row_limit": 1000,
+            "include_search": False,
         },
     },
     25: {
-        "name":     "Latest Prediction Date",
+        "name":     "Model Updates",
         "viz_type": "table",
         "params": {
-            "all_columns": ["ticker", "model_version", "latest_prediction_date"],
+            "all_columns": ["Stock Ticker", "Model Version", "Last Updated"],
             "groupby": [],
             "row_limit": 1000,
+            "include_search": False,
         },
     },
     26: {
-        "name":     "Daily Prediction Residuals",
+        "name":     "Daily Prediction Residual Error",
         "viz_type": "echarts_timeseries_bar",
         "params": {
             "x_axis": "ds",
@@ -272,8 +290,44 @@ CHART_CONFIG = {
         },
         },
     },
-    28: {
-        "name":     "Price Difference",
+
+    29: {
+        "name": "Close",
+        "viz_type": "big_number_total",
+        "params": {
+            "metric": {
+                "label": "Close",
+                "expressionType": "SIMPLE",
+                "column": {"column_name": "close"},
+                "aggregate": "MAX"
+            },
+            "y_axis_format": "$,.2f",
+            "subheader_fontsize": 0.8,
+        },
+    },
+    30: {
+        "name": "Predicted Next Close",
+        "viz_type": "big_number_total", 
+        "params": {
+            "metric": {
+                "label": "Predicted",
+                "expressionType": "SIMPLE",
+                "column": {"column_name": "predicted_close"},
+                "aggregate": "MAX"
+            },
+            "y_axis_format": "$,.2f",
+            "conditional_formatting": [
+                {
+                    "colorScheme": "#28A745", # Superset Success Green
+                    "column": "Predicted",    
+                    "operator": ">",
+                    "targetValue": -999999    
+                }
+            ]
+        },
+    },
+    31: {
+        "name":     "Daily Prediction Error",
         "viz_type": "echarts_timeseries_line",
         "params": {
             "x_axis": "ds",             
@@ -290,8 +344,35 @@ CHART_CONFIG = {
             "seriesType": "line",
             "show_legend": True,
             "rich_tooltip": True,
+            "y_axis_title": "Price Difference ($)",
         },
     },
+
+    32: {
+        "name": "7-Day Price Volatility",
+        "viz_type": "echarts_timeseries_line", 
+        "params": {
+            "x_axis": "ds",
+            "metrics": [
+                {
+                    "label": "Volatility",
+                    "expressionType": "SIMPLE",
+                    "column": {"column_name": "volatility"},
+                    "aggregate": "MAX" # MAX is safe here since there is only one row per date
+                }
+            ],
+            "groupby": ["ticker"], 
+            
+            # UI Polish
+            "y_axis_format": ".2f",
+            "show_legend": False,
+            "rich_tooltip": True,
+            "y_axis_title": "StdDev ($)",
+            # Use a distinct color (like purple) so it doesn't visually blend with your price or error charts
+            "color_picker": {"r": 128, "g": 0, "b": 128, "a": 1}, 
+        },
+    },
+
 }
 
 # Collect all chart/dataset names for teardown matching
