@@ -373,6 +373,19 @@ CHART_CONFIG = {
         },
     },
 
+    33: {
+        "name": "Model Performance Metrics",
+        "viz_type": "table",
+        "params": {
+            # Omit 'ticker' here to keep it hidden from the UI
+            "all_columns": ["Model Version", "MAE ($)", "RMSE ($)", "Creation Date"],
+            "groupby": [],
+            "row_limit": 100,
+            "include_search": False,
+            "order_by_cols": ["[\"Creation Date\", false]"],
+        },
+    },
+
 }
 
 # Collect all chart/dataset names for teardown matching

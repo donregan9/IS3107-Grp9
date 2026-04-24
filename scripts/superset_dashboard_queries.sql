@@ -495,3 +495,21 @@ FROM VolatilityCalc v
 JOIN PredictionStarts p ON v.ticker = p.ticker
 -- Only display the volatility from the prediction start date onward
 WHERE v.ds >= p.start_date;
+
+-- 33) Model Performance Leaderboard (MAE & RMSE)
+SELECT 
+    ticker,                    -- Invisible hook for the Native Dashboard Filter
+    model_version AS "Model Version",
+    
+    -- Mean Absolute Error (MAE)
+    ROUND(AVG(ABS(predicted_close - actual_close))::numeric, 4) AS "MAE ($)",
+    
+    -- Root Mean Squared Error (RMSE)
+    ROUND(SQRT(AVG(POWER(predicted_close - actual_close, 2)))::numeric, 4) AS "RMSE ($)",
+
+    MIN(predicted_date) AS "Creation Date"
+    
+FROM model_predictions
+WHERE actual_close IS NOT NULL
+GROUP BY ticker, model_version
+ORDER BY "Creation Date" DESC;
