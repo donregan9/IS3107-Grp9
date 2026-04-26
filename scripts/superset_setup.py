@@ -15,7 +15,7 @@ Run this script from your local machine (outside Docker):
 Requirements:
     pip install requests
 
-Superset must be running at localhost:8089.
+Superset must be running at 127.0.0.1:8089.
 Every run does a full teardown + recreate — safe to run repeatedly.
 """
 
@@ -26,7 +26,7 @@ import requests
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-SUPERSET_URL    = "http://localhost:8089"
+SUPERSET_URL    = "http://127.0.0.1:8089"
 USERNAME        = "admin"
 PASSWORD        = "admin"
 DB_NAME         = "airflow"
