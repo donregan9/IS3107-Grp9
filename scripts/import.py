@@ -15,7 +15,7 @@ TARGET_DASHBOARD_NAME = "StockSight Prediction Dashboard"
 ZIP_PATH = "../superset/exports/stockSight.zip"
 
 DB_PASSWORDS = {
-    "airflow": "admin" 
+    "databases/airflow.yaml": "airflow" 
 }
 
 # ---------------------------------------------------------------------------

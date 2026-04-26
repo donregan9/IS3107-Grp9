@@ -7,16 +7,29 @@ This project sets up Apache Airflow with PostgreSQL in Docker for automated mark
 ```
 .
 ├── dags/                      # Airflow DAG definitions
+│   └── backfill_pipeline.py
+│   └── lstm_prediction_pipeline.py
 │   └── market_data_pipeline.py
+│   └── prediction_maintenance.py
 ├── scripts/                   # Custom extraction and processing scripts
-│   └── extract.py
-├── data/                      # Local data storage (CSVs, backups)
+│   └── data_validation.py
+│   └── import.py
+│   └── lstm_model.py
+│   └── superset_bootsrap.sh
+│   └── superset_dashboard_queries.sql
+│   └── superset_setup.py
+│   └── ticker_config.py
+├── superset\exports           # Completed Dashboard
+│   └── stockSight.zip
 ├── logs/                      # Airflow logs
 ├── docker-compose.yaml        # Docker services definition
 ├── Dockerfile                 # Custom Airflow image with dependencies
-├── requirements.txt           # Python dependencies
-├── .env                       # Environment variables
-└── README.md                  # This file
+├── Dockerfile.superset        # Custom Airflow image for superset
+├── requirements.txt           
+├── .env                  
+├── start-docker.bat    
+├── start-docker.ps1         
+└── README.md                  
 ```
 
 ## Services
@@ -34,6 +47,10 @@ This project sets up Apache Airflow with PostgreSQL in Docker for automated mark
 3. **pgAdmin** (port 5050)
    - Web interface to manage PostgreSQL
    - Email: `admin@example.com` / Password: `admin`
+
+4. **superset** (port 8089)
+   - Web interface to manage PostgreSQL
+   - Email: `admin` / Password: `admin`
 
 ## Quick Start
 
@@ -59,7 +76,73 @@ docker-compose ps
 
 - **Airflow**: http://localhost:8080 (admin/admin)
 - **pgAdmin**: http://localhost:5050 (admin@example.com/admin)
+- **superset**: http://localhost:8089 (admin/admin)
 - **PostgreSQL**: localhost:5432
+
+## Project Setup Guide
+
+1. Launch the stack: docker-compose up -d
+
+2. Navigate to pgadmin: http://localhost:5050 
+- `admin@example.com`
+3. Create new database `airflow`
+- server name: `airflow`
+- host: `postgres`
+- port: `5432`
+- database, username & password: `airflow`
+
+4. Navigate to airflow: http://localhost:5050 
+5. Run backfill_historical_data dag
+6. Run lstm_weekly_training
+7. Run market_momentum_extraction
+
+8. Navigate to superset: http://localhost:8089 
+9. Connect new postgreSQL database
+- Host: `postgres`
+- Port: `5432`
+- Database name: `airflow`
+- Database password: `airflow`
+10. Run superset_setup.py
+11. Run import.py
+
+# Superset Connect DB Guide
+
+1. Click + (top-right) -> Connect Database -> PostgreSQL.
+2. Use:
+
+Host: postgres
+Port: 5432
+Database: airflow
+Username: airflow
+Password: airflow
+
+3. Test connection, then create datasets/charts.
+
+Sample query:
+
+SELECT * FROM public.stock_prices
+ORDER BY id ASC;
+
+## DAG Orchestration (Market -> Prediction)
+
+backfill_historical_data:
+1. runs once to populate database with historical information
+
+backfill_historical_data:
+1. runs weekly to retrain the model and produce a new version best suited to current trading patterns
+2. must be run before lstm_daily_prediction
+
+market_momentum_extraction:
+1. market_momentum_extraction runs daily to create_table -> fetch_daily_stock_data -> compute_features.
+2. compute_features publishes dataset://stock_features/aapl/ready on success.
+3. lstm_daily_prediction is scheduled on that dataset and starts after the dataset event is emitted.
+
+lstm_daily_prediction:
+1. runs automatically daily after market_momentum_extraction is completed
+
+prediction_maintenance:
+1. runs daily to fill up missed values during container downtime
+
 
 ### View Logs
 
@@ -83,37 +166,6 @@ docker-compose down
 # Stop and remove volumes (clears database)
 docker-compose down -v
 ```
-
-## Configuration
-
-Edit `.env` file to change:
-- Database credentials
-- Airflow admin credentials
-- Airflow configuration variables
-
-## Adding New DAGs
-
-1. Create a new Python file in `/dags/` folder
-2. Define your DAG using Airflow syntax
-3. Restart Airflow webserver (or it will auto-detect within ~5 minutes)
-
-## DAG Orchestration (Market -> Prediction)
-
-This project uses Airflow Datasets so prediction runs only after features are refreshed.
-
-How it works:
-1. market_momentum_extraction runs create_table -> fetch_daily_stock_data -> compute_features.
-2. compute_features publishes dataset://stock_features/aapl/ready on success.
-3. lstm_daily_prediction is scheduled on that dataset and starts after the dataset event is emitted.
-
-Trigger behavior:
-1. Daily scheduled market run success triggers prediction.
-2. Manual market run success also triggers prediction.
-3. If compute_features fails, no dataset event is emitted, so prediction will not run.
-
-Notes:
-1. Dataset scheduling requires Airflow 2.4 or later.
-2. After DAG code changes, wait for scheduler refresh or restart airflow-scheduler and airflow-webserver.
 
 ## Adding Dependencies
 
@@ -144,90 +196,10 @@ docker-compose restart postgres
 ### Port already in use
 Edit `docker-compose.yaml` and change ports (e.g., 8081:8080 for Airflow)
 
-## Set-up Process
-
-Navigate to postgresql
-1. Add New Server
-2. Server Name: airflow
-3. Host: postgres
-4. Port: 5432
-5. Database, Username and password: airflow
-
-Navigate to airflow
-1. Run Backfill DAG
-2. Run Market Momentum DAG
-3. Run Weekly training
-4. Run Daily prediction
-
-Follow the steps on Superset Setup Guide Below
-
-## Next Steps
-
-1. Modify `market_data_pipeline.py` DAG to fetch different tickers
-2. Extend the extraction logic in `/scripts/extract.py`
-3. Add data transformation tasks to the DAG
-4. Set up alerts and monitoring
-5. Deploy to GCP Cloud Composer for production
-
 ## Support
 
 For issues with:
 - **Airflow**: https://airflow.apache.org/docs/
 - **Docker**: https://docs.docker.com/
 - **PostgreSQL**: https://www.postgresql.org/docs/
-
-# Superset Dashboard Setup Guide
-
-Superset is already included in this project's docker-compose stack.
-
-1. Start services:
-
-docker compose up -d
-
-2. Open Superset:
-
-http://localhost:8089
-
-Default credentials:
-- username: admin
-- password: admin
-
-# Team-Shared Dashboards (Dashboards as Code)
-
-This repo is configured to auto-import dashboard export bundles on Superset startup.
-
-Import folder in git:
-- superset/exports/
-
-How to share dashboards with teammates:
-1. In Superset, export your dashboard bundle as a .zip.
-2. Put the zip file into superset/exports/.
-3. Commit and push.
-4. Teammates pull and run docker compose up -d (or docker compose restart superset).
-5. Superset imports bundles automatically at startup.
-
-Notes:
-1. Import uses overwrite mode where supported, so updates can be rolled out by replacing the zip.
-2. Keep only the dashboard bundles you want auto-loaded in superset/exports/.
-
-# Superset Connect DB Guide
-
-1. Click + (top-right) -> Connect Database -> PostgreSQL.
-2. Use:
-
-Host: postgres
-Port: 5432
-Database: airflow
-Username: airflow
-Password: airflow
-
-3. Test connection, then create datasets/charts.
-
-Sample query:
-
-SELECT * FROM public.stock_prices
-ORDER BY id ASC;
-
-# To Remove Superset
-
-docker compose down
+- **Superset**: https://superset.apache.org/user-docs/
