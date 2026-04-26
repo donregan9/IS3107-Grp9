@@ -1,206 +1,306 @@
-# Market Data Pipeline - Docker Setup
+# Market Data Pipeline (Airflow + PostgreSQL + Superset)
 
-This project sets up Apache Airflow with PostgreSQL in Docker for automated market data extraction and storage.
+This project runs a local data platform for stock ingestion, feature engineering, LSTM training/prediction, and dashboarding.
 
-## Project Structure
+## What You Get
 
-```
+- Airflow DAG orchestration
+- PostgreSQL storage
+- pgAdmin database UI
+- Superset dashboard UI
+
+## Tech Stack and Ports
+
+| Service | Container | Host URL / Port | Default Login |
+|---|---|---|---|
+| Airflow Webserver | `airflow-webserver` | `http://127.0.0.1:8080` | `admin` / `admin` |
+| PostgreSQL | `airflow-postgres` | `127.0.0.1:5433` | DB: `airflow`, User: `airflow`, Pass: `airflow` |
+| pgAdmin | `airflow-pgadmin` | `http://127.0.0.1:5050` | `admin@example.com` / `admin` |
+| Superset | `superset` | `http://127.0.0.1:8089` | `admin` / `admin` |
+| Redis | `superset-redis` | `127.0.0.1:6379` | N/A |
+
+Notes:
+- From your host machine, PostgreSQL is exposed on port `5433`.
+- Inside Docker network (Airflow/Superset containers), PostgreSQL is `postgres:5432`.
+
+## Repository Structure
+
+```text
 .
-├── dags/                      # Airflow DAG definitions
-│   └── backfill_pipeline.py
-│   └── lstm_prediction_pipeline.py
-│   └── market_data_pipeline.py
+├── dags/
+│   ├── backfill_pipeline.py
+│   ├── market_data_pipeline.py
+│   ├── lstm_prediction_pipeline.py
 │   └── prediction_maintenance.py
-├── scripts/                   # Custom extraction and processing scripts
-│   └── data_validation.py
-│   └── import.py
-│   └── lstm_model.py
-│   └── superset_bootsrap.sh
-│   └── superset_dashboard_queries.sql
-│   └── superset_setup.py
-│   └── ticker_config.py
-├── superset\exports           # Completed Dashboard
+├── scripts/
+│   ├── data_validation.py
+│   ├── ticker_config.py
+│   ├── lstm_model.py
+│   ├── superset_setup.py
+│   ├── import.py
+│   ├── superset_dashboard_queries.sql
+│   └── superset_bootstrap.sh
+├── superset/exports/
 │   └── stockSight.zip
-├── logs/                      # Airflow logs
-├── docker-compose.yaml        # Docker services definition
-├── Dockerfile                 # Custom Airflow image with dependencies
-├── Dockerfile.superset        # Custom Airflow image for superset
-├── requirements.txt           
-├── .env                  
-├── start-docker.bat    
-├── start-docker.ps1         
-└── README.md                  
+├── docker-compose.yaml
+├── Dockerfile
+├── Dockerfile.superset
+├── requirements.txt
+├── .env
+├── start-docker.ps1
+└── start-docker.bat
 ```
 
-## Services
+## Prerequisites
 
-1. **PostgreSQL** (port 5432)
-   - Stores stock prices and metadata
-   - User: `airflow` / Password: `airflow`
-   - Database: `airflow`
+Install the following first:
 
-2. **Apache Airflow** (port 8080)
-   - Webserver: UI for managing DAGs
-   - Scheduler: Automatically runs tasks on schedule
-   - User: `admin` / Password: `admin`
+1. Docker Desktop (Windows)
+2. Git
+3. Python 3.10+ (for local helper scripts)
 
-3. **pgAdmin** (port 5050)
-   - Web interface to manage PostgreSQL
-   - Email: `admin@example.com` / Password: `admin`
+Optional but recommended:
 
-4. **superset** (port 8089)
-   - Web interface to manage PostgreSQL
-   - Email: `admin` / Password: `admin`
+1. VS Code
+2. PowerShell 7+
 
-## Quick Start
-
-### Prerequisites
-- Docker Desktop installed
-- Docker Compose installed
-- On Windows, use PowerShell or WSL2
-
-### Launch the Stack
+## 1) Clone and Enter Project
 
 ```powershell
-# Navigate to project directory
-cd "C:\Users\regan\OneDrive\Desktop\Uni\Y3S2\IS3107\Project"
-
-# Start all services
-docker-compose up -d
-
-# Check status
-docker-compose ps
+git clone <YOUR_REPO_URL>
+cd <YOUR_REPO_FOLDER>
 ```
 
-### Access the UIs
+Or if already cloned:
 
-- **Airflow**: http://localhost:8080 (admin/admin)
-- **pgAdmin**: http://localhost:5050 (admin@example.com/admin)
-- **superset**: http://localhost:8089 (admin/admin)
-- **PostgreSQL**: localhost:5432
+Go to project directory
 
-## Project Setup Guide
+## 2) Configure Environment File
 
-1. Launch the stack: docker-compose up -d
+Ensure `.env` exists in project root and contains at least:
 
-2. Navigate to pgadmin: http://localhost:5050 
-- `admin@example.com`
-3. Create new database `airflow`
-- server name: `airflow`
-- host: `postgres`
-- port: `5432`
-- database, username & password: `airflow`
+```env
+# Airflow
+AIRFLOW_HOME=/opt/airflow
+AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+AIRFLOW__CORE__LOAD_EXAMPLES=false
+AIRFLOW__CORE__LOAD_DEFAULT_CONNECTIONS=false
 
-4. Navigate to airflow: http://localhost:5050 
-5. Run backfill_historical_data dag
-6. Run lstm_weekly_training
-7. Run market_momentum_extraction
+# App DB settings consumed in DAG code
+DB_HOST=postgres
+DB_USER=airflow
+DB_PASSWORD=airflow
+DB_NAME=airflow
+DB_PORT=5432
 
-8. Navigate to superset: http://localhost:8089 
-9. Connect new postgreSQL database
-- Host: `postgres`
-- Port: `5432`
-- Database name: `airflow`
-- Database password: `airflow`
-10. Run superset_setup.py
-11. Run import.py
+# Postgres container
+POSTGRES_USER=airflow
+POSTGRES_PASSWORD=airflow
+POSTGRES_DB=airflow
 
-# Superset Connect DB Guide
+# Airflow UI auth
+AIRFLOW_USERNAME=admin
+AIRFLOW_PASSWORD=admin
+```
 
-1. Click + (top-right) -> Connect Database -> PostgreSQL.
+## 3) Start Docker Stack
+
+From project root:
+
+```powershell
+docker compose up -d --build
+```
+
+Check service health:
+
+```powershell
+docker compose ps
+```
+
+You should see `Up` (and most services `healthy`).
+
+## 4) Open UIs
+
+1. Airflow: `http://127.0.0.1:8080`
+2. pgAdmin: `http://127.0.0.1:5050`
+3. Superset: `http://127.0.0.1:8089`
+
+Use `127.0.0.1` (not `localhost`) to avoid Windows loopback issues.
+
+## 5) pgAdmin Setup (One Time)
+
+1. Open pgAdmin and log in: `admin@example.com` / `admin`.
+2. Add server:
+   - Name: `airflow`
+   - Host: `postgres`
+   - Port: `5432`
+   - Maintenance DB: `airflow`
+   - Username: `airflow`
+   - Password: `airflow`
+3. Save.
+
+## 6) Airflow First-Run Workflow
+
+Open Airflow UI and trigger DAGs in this order.
+
+1. `backfill_historical_data` (manual one-off)
+   - Purpose: initial historical load.
+
+2. `market_momentum_extraction` (manual once, then scheduled `@daily`)
+   - Purpose: daily ingestion + feature engineering.
+
+3. `lstm_weekly_training` (manual once initially, then scheduled weekly)
+   - Purpose: train model artifacts required for prediction.
+
+4. `lstm_daily_prediction`
+   - Triggered by dataset emitted from `market_momentum_extraction`.
+
+5. `prediction_maintenance` (scheduled `@daily`)
+   - Backfills missed predictions and updates actual closes.
+
+## 7) Superset Database Connection (One Time)
+
+In Superset UI:
+
+1. Click `+` -> `Data` -> `Connect database` -> `PostgreSQL`.
 2. Use:
+   - Host: `postgres`
+   - Port: `5432`
+   - Database name: `airflow`
+   - Username: `airflow`
+   - Password: `airflow`
+3. Test connection and Save.
 
-Host: postgres
-Port: 5432
-Database name: airflow
-Username: airflow
-Password: airflow
-Display name: airflow
+## 8) Run Superset Automation Scripts
 
-3. Test connection, then create datasets/charts.
+These scripts should be run from the `scripts` folder.
 
-Sample query:
-
-SELECT * FROM public.stock_prices
-ORDER BY id ASC;
-
-## DAG Orchestration (Market -> Prediction)
-
-backfill_historical_data:
-1. runs once to populate database with historical information
-
-backfill_historical_data:
-1. runs weekly to retrain the model and produce a new version best suited to current trading patterns
-2. must be run before lstm_daily_prediction
-
-market_momentum_extraction:
-1. market_momentum_extraction runs daily to create_table -> fetch_daily_stock_data -> compute_features.
-2. compute_features publishes dataset://stock_features/aapl/ready on success.
-3. lstm_daily_prediction is scheduled on that dataset and starts after the dataset event is emitted.
-
-lstm_daily_prediction:
-1. runs automatically daily after market_momentum_extraction is completed
-
-prediction_maintenance:
-1. runs daily to fill up missed values during container downtime
-
-
-### View Logs
+Run setup script:
 
 ```powershell
-# Watch scheduler logs
-docker-compose logs -f airflow-scheduler
-
-# Watch webserver logs
-docker-compose logs -f airflow-webserver
-
-# View all logs
-docker-compose logs -f
+python superset_setup.py
 ```
 
-### Stop the Stack
+Import dashboard bundle:
 
 ```powershell
-# Stop all containers
-docker-compose down
-
-# Stop and remove volumes (clears database)
-docker-compose down -v
+python import.py
 ```
 
-## Adding Dependencies
+If you get connection reset on Windows, verify:
 
-1. Update `requirements.txt`
-2. Rebuild the image: `docker-compose build`
-3. Restart services: `docker-compose up -d`
-
-## Troubleshooting
-
-### Airflow won't start
 ```powershell
-# Check logs
-docker-compose logs airflow-webserver
-
-# Restart services
-docker-compose restart airflow-webserver airflow-scheduler
+$env:SUPERSET_URL
+python -c "import os; print(os.getenv('SUPERSET_URL'))"
 ```
 
-### PostgreSQL connection fails
+Expected value is:
+
+```text
+http://127.0.0.1:8089
+```
+
+## 9) Common Commands
+
+Start stack:
+
 ```powershell
-# Check if postgres is healthy
-docker-compose ps
-
-# Restart postgres
-docker-compose restart postgres
+docker compose up -d
 ```
 
-### Port already in use
-Edit `docker-compose.yaml` and change ports (e.g., 8081:8080 for Airflow)
+Rebuild stack:
 
-## Support
+```powershell
+docker compose up -d --build
+```
 
-For issues with:
-- **Airflow**: https://airflow.apache.org/docs/
-- **Docker**: https://docs.docker.com/
-- **PostgreSQL**: https://www.postgresql.org/docs/
-- **Superset**: https://superset.apache.org/user-docs/
+Check status:
+
+```powershell
+docker compose ps
+```
+
+Tail all logs:
+
+```powershell
+docker compose logs -f
+```
+
+Tail specific logs:
+
+```powershell
+docker compose logs -f airflow-webserver
+docker compose logs -f airflow-scheduler
+docker compose logs -f superset
+docker compose logs -f postgres
+```
+
+Restart one service:
+
+```powershell
+docker compose restart superset
+```
+
+Stop stack:
+
+```powershell
+docker compose down
+```
+
+Stop and remove volumes (full reset):
+
+```powershell
+docker compose down -v
+```
+
+## 10) Troubleshooting
+
+### A) Superset script connection reset (`WinError 10054`)
+
+1. Use `127.0.0.1` URLs, not `localhost`.
+2. Confirm Superset is healthy:
+
+```powershell
+docker compose ps
+```
+
+3. Confirm env value:
+
+```powershell
+$env:SUPERSET_URL
+```
+
+4. If needed, force it for session:
+
+```powershell
+$env:SUPERSET_URL="http://127.0.0.1:8089"
+python superset_setup.py
+```
+
+### B) `python superset_setup.py` says file not found
+
+Run from `scripts` directory:
+
+```powershell
+cd scripts
+python superset_setup.py
+```
+
+### C) Superset says DB `airflow` not found
+
+You have not created Superset's DB connection yet. Complete Section 7 first.
+
+### D) Airflow DAG imports fail
+
+Rebuild images after dependency changes:
+
+```powershell
+docker compose up -d --build
+```
+
+## References
+
+- Airflow docs: https://airflow.apache.org/docs/
+- Docker docs: https://docs.docker.com/
+- PostgreSQL docs: https://www.postgresql.org/docs/
+- Superset docs: https://superset.apache.org/user-docs/
