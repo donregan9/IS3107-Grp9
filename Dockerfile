@@ -12,14 +12,13 @@ RUN apt-get update && apt-get install -y \
 
 USER airflow
 
+COPY requirements.txt /tmp/requirements.txt
+
 # Install Python dependencies
 RUN pip install --no-cache-dir \
-    psycopg2-binary==2.9.9 \
+    -r /tmp/requirements.txt \
     yfinance==0.2.32 \
-    pandas==2.1.3 \
-    numpy==1.24.3 \
     google-cloud-bigquery==3.13.0 \
     google-cloud-storage==2.10.0 \
     apache-airflow-providers-google==10.10.0 \
-    scikit-learn \
     tensorflow-cpu
