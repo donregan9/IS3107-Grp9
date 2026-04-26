@@ -101,9 +101,6 @@ POSTGRES_DB=airflow
 # Airflow UI auth
 AIRFLOW_USERNAME=admin
 AIRFLOW_PASSWORD=admin
-
-# Local Superset API base for scripts
-SUPERSET_URL=http://127.0.0.1:8089
 ```
 
 ## 3) Start Docker Stack
@@ -177,14 +174,6 @@ In Superset UI:
 ## 8) Run Superset Automation Scripts
 
 These scripts should be run from the `scripts` folder.
-
-```powershell
-cd scripts
-python -m venv .venv
-.\.venv\Scripts\activate
-python -m pip install --upgrade pip
-pip install requests
-```
 
 Run setup script:
 
