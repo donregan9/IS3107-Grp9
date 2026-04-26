@@ -1,5 +1,6 @@
 import os
 import json
+import urllib.parse
 import requests
 
 # ---------------------------------------------------------------------------
@@ -9,11 +10,10 @@ SUPERSET_URL = "http://localhost:8089"
 USERNAME     = "admin"
 PASSWORD     = "admin"
 
-# The path to the ZIP file you exported from the Superset UI
+TARGET_DASHBOARD_NAME = "StockSight Prediction Dashboard" 
+
 ZIP_PATH = "../superset/exports/stockSight.zip"
 
-# Superset needs the database password to reconnect your 'airflow' database 
-# during the import process. Replace 'your_db_password' if it is different.
 DB_PASSWORDS = {
     "airflow": "admin" 
 }
@@ -52,6 +52,43 @@ def create_session():
     return session
 
 # ---------------------------------------------------------------------------
+# Pre-Import Cleanup (Delete by Name)
+# ---------------------------------------------------------------------------
+def delete_existing_dashboards(session, dashboard_name):
+    print(f"\n--- Searching for existing dashboards named '{dashboard_name}' ---")
+    
+    query_payload = {
+        "filters": [{"col": "dashboard_title", "opr": "eq", "value": dashboard_name}]
+    }
+    
+    encoded_query = urllib.parse.quote(json.dumps(query_payload))
+    search_url = f"{SUPERSET_URL}/api/v1/dashboard/?q={encoded_query}"
+    
+    search_resp = session.get(search_url)
+    
+    if not search_resp.ok:
+        print(f" ✗ Error searching for dashboards: {search_resp.status_code} - {search_resp.text}")
+        return
+
+    dashboards = search_resp.json().get("result", [])
+    
+    if not dashboards:
+        print(" ✓ No duplicates found. Safe to proceed.")
+        return
+
+    print(f" ! Found {len(dashboards)} existing dashboard(s). Deleting now...")
+    
+    for dash in dashboards:
+        dash_id = dash["id"]
+        delete_url = f"{SUPERSET_URL}/api/v1/dashboard/{dash_id}"
+        
+        del_resp = session.delete(delete_url)
+        if del_resp.ok:
+            print(f"   ✓ Deleted dashboard ID {dash_id}")
+        else:
+            print(f"   ✗ Failed to delete ID {dash_id}: {del_resp.status_code}")
+
+# ---------------------------------------------------------------------------
 # Import Dashboard
 # ---------------------------------------------------------------------------
 def import_dashboard(session):
@@ -63,19 +100,15 @@ def import_dashboard(session):
 
     url = f"{SUPERSET_URL}/api/v1/dashboard/import/"
     
-    # Superset requires the ZIP to be sent as multipart/form-data.
-    # The 'requests' library handles the Content-Type automatically when using the 'files' parameter.
     with open(ZIP_PATH, "rb") as f:
         files = {
             "formData": (os.path.basename(ZIP_PATH), f, "application/zip")
         }
         data = {
-            "overwrite": "true", # Allows you to re-run the script safely
+            "overwrite": "true", 
             "passwords": json.dumps(DB_PASSWORDS)
         }
         
-        # Note: Do not manually set Content-Type to multipart/form-data; 
-        # requests will do it and append the necessary boundary string.
         resp = session.post(url, files=files, data=data)
 
     if resp.ok:
@@ -91,7 +124,13 @@ def import_dashboard(session):
 def main():
     print("=== Superset Dashboard Auto-Importer ===\n")
     session = create_session()
+    
+    # 1. Delete Clone Dashboard
+    delete_existing_dashboards(session, TARGET_DASHBOARD_NAME)
+    
+    # 2. Import finished dashboard
     import_dashboard(session)
+    
     print("\n=== Done ===")
 
 if __name__ == "__main__":
