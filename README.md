@@ -112,9 +112,10 @@ docker-compose ps
 
 Host: postgres
 Port: 5432
-Database: airflow
+Database name: airflow
 Username: airflow
 Password: airflow
+Display name: airflow
 
 3. Test connection, then create datasets/charts.
 
