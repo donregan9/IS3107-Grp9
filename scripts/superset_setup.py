@@ -38,73 +38,6 @@ DASHBOARD_TITLE = "StockSight Prediction Dashboard"
 # ---------------------------------------------------------------------------
 CHART_CONFIG = {
     1: {
-        "name":     "Price Trend with Moving Averages",
-        "viz_type": "echarts_timeseries_line",
-        "params": {
-            "x_axis": "ds",
-            "metrics": [
-                {"label": "close",  "expressionType": "SIMPLE", "column": {"column_name": "close"},  "aggregate": "MAX"},
-                {"label": "sma_20", "expressionType": "SIMPLE", "column": {"column_name": "sma_20"}, "aggregate": "MAX"},
-                {"label": "sma_50", "expressionType": "SIMPLE", "column": {"column_name": "sma_50"}, "aggregate": "MAX"},
-                {"label": "ema_12", "expressionType": "SIMPLE", "column": {"column_name": "ema_12"}, "aggregate": "MAX"},
-                {"label": "ema_26", "expressionType": "SIMPLE", "column": {"column_name": "ema_26"}, "aggregate": "MAX"},
-            ],
-            "groupby": [],
-            "time_grain_sqla": "P1D",
-        },
-    },
-    2: {
-        "name":     "Candlestick OHLCV",
-        "viz_type": "echarts_candlestick",
-        "params": {
-            "x_axis": "ds",
-            "open":   {"label": "open",  "expressionType": "SIMPLE", "column": {"column_name": "open"},  "aggregate": "MAX"},
-            "close":  {"label": "close", "expressionType": "SIMPLE", "column": {"column_name": "close"}, "aggregate": "MAX"},
-            "high":   {"label": "high",  "expressionType": "SIMPLE", "column": {"column_name": "high"},  "aggregate": "MAX"},
-            "low":    {"label": "low",   "expressionType": "SIMPLE", "column": {"column_name": "low"},   "aggregate": "MAX"},
-            "time_grain_sqla": "P1D",
-        },
-    },
-    3: {
-        "name":     "RSI Momentum",
-        "viz_type": "echarts_timeseries_line",
-        "params": {
-            "x_axis": "ds",
-            "metrics": [
-                {"label": "rsi_14", "expressionType": "SIMPLE", "column": {"column_name": "rsi_14"}, "aggregate": "MAX"},
-            ],
-            "groupby": [],
-            "time_grain_sqla": "P1D",
-        },
-    },
-    4: {
-        "name":     "MACD vs Signal",
-        "viz_type": "echarts_timeseries_line",
-        "params": {
-            "x_axis": "ds",
-            "metrics": [
-                {"label": "macd",        "expressionType": "SIMPLE", "column": {"column_name": "macd"},        "aggregate": "MAX"},
-                {"label": "macd_signal", "expressionType": "SIMPLE", "column": {"column_name": "macd_signal"}, "aggregate": "MAX"},
-            ],
-            "groupby": [],
-            "time_grain_sqla": "P1D",
-        },
-    },
-    5: {
-        "name":     "Bollinger Bands",
-        "viz_type": "echarts_timeseries_line",
-        "params": {
-            "x_axis": "ds",
-            "metrics": [
-                {"label": "close",    "expressionType": "SIMPLE", "column": {"column_name": "close"},    "aggregate": "MAX"},
-                {"label": "bb_upper", "expressionType": "SIMPLE", "column": {"column_name": "bb_upper"}, "aggregate": "MAX"},
-                {"label": "bb_lower", "expressionType": "SIMPLE", "column": {"column_name": "bb_lower"}, "aggregate": "MAX"},
-            ],
-            "groupby": [],
-            "time_grain_sqla": "P1D",
-        },
-    },
-    6: {
         "name":     "Predicted vs Actual Close",
         "viz_type": "echarts_timeseries_line",
         "params": {
@@ -114,8 +47,6 @@ CHART_CONFIG = {
             "metrics": [
                 {"label": "Predicted", "expressionType": "SIMPLE", "column": {"column_name": "predicted_close"}, "aggregate": "MAX"},
                 {"label": "Actual",    "expressionType": "SIMPLE", "column": {"column_name": "actual_close"},    "aggregate": "MAX"},
-                # {"label": "Error", "expressionType": "SIMPLE", "column": {"column_name": "error"}, "aggregate": "MAX"},
-                # {"label": "Absolute Error",    "expressionType": "SIMPLE", "column": {"column_name": "abs_error"},    "aggregate": "MAX"},
             ],
             "groupby": [],
             "time_grain_sqla": "P1D",
@@ -125,18 +56,7 @@ CHART_CONFIG = {
             "y_axis_title": "Price ($)",
         },
     },
-    7: {
-        "name":     "Prediction Quality by Model Version",
-        "viz_type": "echarts_bar",
-        "params": {
-            "groupby": ["model_version"],
-            "metrics": [
-                {"label": "mae",  "expressionType": "SIMPLE", "column": {"column_name": "mae"},  "aggregate": "MAX"},
-                {"label": "rmse", "expressionType": "SIMPLE", "column": {"column_name": "rmse"}, "aggregate": "MAX"},
-            ],
-        },
-    },
-    8: {
+    2: {
         "name": "Rolling 7-Day Directional Accuracy",
         "viz_type": "echarts_timeseries_line",
         "params": {
@@ -149,10 +69,8 @@ CHART_CONFIG = {
                     "aggregate": "MAX" 
                 },
             ],
-            # This forces Superset to display 0.654 as "65.4%"
             "y_axis_format": ".1%", 
             
-            # Locks the Y-Axis between 0% and 100% so the chart doesn't bounce around
             "y_axis_bounds": [0, 1], 
             
             # Optional UI Polish
@@ -162,28 +80,7 @@ CHART_CONFIG = {
             "color_picker": {"r": 255, "g": 165, "b": 0, "a": 1}, # Orange line for distinction
         },
     },
-    9: {
-        "name":     "Daily Return Distribution",
-        "viz_type": "Histogram",
-        "params": {
-            "all_columns": ["daily_return"],
-            "groupby": [],
-        },
-    },
-    10: {
-        "name":     "Pipeline Freshness Scorecard",
-        "viz_type": "table",
-        "params": {
-            "all_columns": [
-                "latest_price_date",
-                "latest_feature_date",
-                "latest_prediction_date",
-                "checked_at",
-            ],
-            "groupby": [],
-        },
-    },
-    11: {
+    3: {
     "name": "DAG Reliability",
     "viz_type": "echarts_timeseries_bar",
     "params": {
@@ -201,19 +98,7 @@ CHART_CONFIG = {
         "color_scheme": "d3Category10"
     }
     },
-    12: {
-        "name":     "DAG Run Duration Trend",
-        "viz_type": "echarts_timeseries_line",
-        "params": {
-            "x_axis": "run_date",
-            "metrics": [
-                {"label": "duration_minutes", "expressionType": "SIMPLE", "column": {"column_name": "duration_minutes"}, "aggregate": "MAX"},
-            ],
-            "groupby": ["dag_id"],
-            "time_grain_sqla": "P1D",
-        },
-    },
-    23: {
+    4: {
         "name":     "Ticker",
         "viz_type": "table",
         "params": {
@@ -223,27 +108,7 @@ CHART_CONFIG = {
             "include_search": False,
         },
     },
-    24: {
-        "name":     "Latest Feature Date",
-        "viz_type": "table",
-        "params": {
-            "all_columns": ["Stock Ticker", "Last Updated"],
-            "groupby": [],
-            "row_limit": 1000,
-            "include_search": False,
-        },
-    },
-    25: {
-        "name":     "Model Updates",
-        "viz_type": "table",
-        "params": {
-            "all_columns": ["Stock Ticker", "Model Version", "Last Updated"],
-            "groupby": [],
-            "row_limit": 1000,
-            "include_search": False,
-        },
-    },
-    26: {
+    5: {
         "name":     "Daily Prediction Residual Error",
         "viz_type": "echarts_timeseries_bar",
         "params": {
@@ -260,22 +125,20 @@ CHART_CONFIG = {
             "time_grain_sqla": "P1D",
             "y_axis_title": "Price Difference ($)",
             "show_legend": True,
-            # This makes the bars easier to read relative to the 0 line
+
             "seriesType": "bar",
             "opacity": 0.7,
         },
     },
-    27: {
+    6: {
         "name":     "Prediction Error Distribution",
         "viz_type": "histogram_v2",
         "params": {
-            # 'column' replaces 'all_columns_x'
             "column": "prediction_error", 
-            # 'bins' replaces 'link_length'
             "bins": 25,
             "query_mode": "raw",
             "time_range": "No filter",
-            "x_axis_title": "Error ($)", # v2 often uses 'title' instead of 'label'
+            "x_axis_title": "Error ($)", 
             "y_axis_title": "Frequency",
             "adhoc_filters": [],
             "row_limit": 1000,
@@ -290,8 +153,7 @@ CHART_CONFIG = {
         },
         },
     },
-
-    29: {
+    7: {
         "name": "Close",
         "viz_type": "big_number_total",
         "params": {
@@ -305,7 +167,7 @@ CHART_CONFIG = {
             "subheader_fontsize": 0.8,
         },
     },
-    30: {
+    8: {
         "name": "Predicted Next Close",
         "viz_type": "big_number_total", 
         "params": {
@@ -318,7 +180,7 @@ CHART_CONFIG = {
             "y_axis_format": "$,.2f",
             "conditional_formatting": [
                 {
-                    "colorScheme": "#28A745", # Superset Success Green
+                    "colorScheme": "#28A745", 
                     "column": "Predicted",    
                     "operator": ">",
                     "targetValue": -999999    
@@ -326,58 +188,10 @@ CHART_CONFIG = {
             ]
         },
     },
-    31: {
-        "name":     "Daily Prediction Error",
-        "viz_type": "echarts_timeseries_line",
-        "params": {
-            "x_axis": "ds",             
-            "granularity_sqla": "ds",    
-            "time_range": "No filter",   
-            "metrics": [
-                # {"label": "Predicted", "expressionType": "SIMPLE", "column": {"column_name": "predicted_close"}, "aggregate": "MAX"},
-                # {"label": "Actual",    "expressionType": "SIMPLE", "column": {"column_name": "actual_close"},    "aggregate": "MAX"},
-                {"label": "Error", "expressionType": "SIMPLE", "column": {"column_name": "error"}, "aggregate": "MAX"},
-                {"label": "Absolute Error",    "expressionType": "SIMPLE", "column": {"column_name": "abs_error"},    "aggregate": "MAX"},
-            ],
-            "groupby": [],
-            "time_grain_sqla": "P1D",
-            "seriesType": "line",
-            "show_legend": True,
-            "rich_tooltip": True,
-            "y_axis_title": "Price Difference ($)",
-        },
-    },
-
-    32: {
-        "name": "7-Day Price Volatility",
-        "viz_type": "echarts_timeseries_line", 
-        "params": {
-            "x_axis": "ds",
-            "metrics": [
-                {
-                    "label": "Volatility",
-                    "expressionType": "SIMPLE",
-                    "column": {"column_name": "volatility"},
-                    "aggregate": "MAX" # MAX is safe here since there is only one row per date
-                }
-            ],
-            "groupby": ["ticker"], 
-            
-            # UI Polish
-            "y_axis_format": ".2f",
-            "show_legend": False,
-            "rich_tooltip": True,
-            "y_axis_title": "StdDev ($)",
-            # Use a distinct color (like purple) so it doesn't visually blend with your price or error charts
-            "color_picker": {"r": 128, "g": 0, "b": 128, "a": 1}, 
-        },
-    },
-
-    33: {
+    9: {
         "name": "Model Performance Metrics",
         "viz_type": "table",
         "params": {
-            # Omit 'ticker' here to keep it hidden from the UI
             "all_columns": ["Model Version", "MAE ($)", "RMSE ($)", "Creation Date"],
             "groupby": [],
             "row_limit": 100,
@@ -588,7 +402,6 @@ def add_native_filter_to_dashboard(session, dashboard_id, filter_dataset_id, exc
     dash_data = resp.json()["result"]
     
     # 2. Parse the hidden json_metadata (where filters live)
-    # FIX: Handle the case where the API explicitly returns None
     raw_metadata = dash_data.get("json_metadata") or "{}"
     json_meta = json.loads(raw_metadata)
     
@@ -662,7 +475,7 @@ def main():
             )
             chart_ids.append(chart_id)
             chart_names.append(config["name"])
-            if num in [11, 12]:
+            if num in [3]:
                 exclude_from_filter.append(chart_id)
 
     filter_sql = "SELECT unnest(ARRAY['AAPL', 'MSFT', 'NVDA']) AS ticker;"
