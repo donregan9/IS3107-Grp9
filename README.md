@@ -145,12 +145,12 @@ Open Airflow UI and trigger DAGs in this order.
 
 1. `backfill_historical_data` (manual one-off)
    - Purpose: initial historical load.
-
-2. `market_momentum_extraction` (manual once, then scheduled `@daily`)
-   - Purpose: daily ingestion + feature engineering.
-
-3. `lstm_weekly_training` (manual once initially, then scheduled weekly)
+   
+2. `lstm_weekly_training` (manual once initially, then scheduled weekly)
    - Purpose: train model artifacts required for prediction.
+
+3. `market_momentum_extraction` (manual once, then scheduled `@daily`)
+   - Purpose: daily ingestion + feature engineering.
 
 4. `lstm_daily_prediction`
    - Triggered by dataset emitted from `market_momentum_extraction`.
